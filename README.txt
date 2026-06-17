@@ -1,14 +1,25 @@
-DATA AWS CORREGIDA
+CORRECCIÓN AWS PROMEDIO DM / RD
 
-Regla aplicada:
-AWS = (VENTA DEL MES / # DIAS DEL MES) * 7
+Problema detectado:
+La pestaña DM y RD estaba SUMANDO el AWS de sus tiendas.
+Ejemplo: 10 tiendas x ~$419K promedio = ~$4,196K mostrado.
 
-Ejemplo:
-Enero: Venta mensual / 31 * 7
-Febrero 2026: Venta mensual / 28 * 7
-Marzo: Venta mensual / 31 * 7
-Abril: Venta mensual / 30 * 7
-Mayo: Venta mensual / 31 * 7
+Corrección aplicada:
+1. Tienda:
+   AWS = (Venta Mes / días del mes) * 7
 
-Registros recalculados: 4687
-Valores que cambiaron vs archivo recibido: 0
+2. DM:
+   AWS DM = Promedio simple de los AWS de sus tiendas con dato del mes.
+
+3. RD:
+   AWS RD = Promedio simple de los AWS de todas sus tiendas con dato del mes.
+
+4. Venta Mes:
+   Se mantiene como SUMA mensual del portafolio.
+
+Archivos a subir a GitHub:
+- data.js
+- app.js
+
+Importante:
+Sube ambos archivos. Si solo subes data.js, el sitio puede seguir sumando AWS porque la lógica estaba en app.js.
