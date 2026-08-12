@@ -1,0 +1,53 @@
+#!/usr/bin/env python3
+"""Prepara un artefacto mínimo de GitHub Pages sin publicar motores crudos."""
+
+from __future__ import annotations
+
+import argparse
+import os
+import shutil
+import tempfile
+from pathlib import Path
+
+FILES = ("index.html", "styles.css", "operational.css", "app.js", "manifest.webmanifest", "sw.js")
+DATA = ("dashboard.json", "audit.json")
+ASSETS = ("icon.svg", "icon-192.png", "icon-512.png")
+
+
+def copy_file(root: Path, staged: Path, relative: Path) -> None:
+    source = root / relative
+    if not source.is_file() or source.is_symlink(): raise ValueError(f"Archivo requerido inválido: {relative}")
+    destination = staged / relative; destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, destination)
+
+
+def stage(root: Path, output: Path) -> None:
+    root = root.resolve(); output = output.resolve()
+    if output in {root, root / "data", root / "assets"} or root not in output.parents:
+        raise ValueError("La salida debe ser una carpeta segura dentro del proyecto.")
+    with tempfile.TemporaryDirectory(prefix="perfil-stage-", dir=root) as temporary:
+        staged = Path(temporary) / "site"; staged.mkdir()
+        for name in FILES: copy_file(root, staged, Path(name))
+        for name in DATA: copy_file(root, staged, Path("data") / name)
+        for name in ASSETS: copy_file(root, staged, Path("assets") / name)
+        (staged / ".nojekyll").touch()
+        backup = output.with_name(f".{output.name}.backup")
+        if backup.exists(): shutil.rmtree(backup)
+        if output.exists(): os.replace(output, backup)
+        try: os.replace(staged, output)
+        except BaseException:
+            if backup.exists() and not output.exists(): os.replace(backup, output)
+            raise
+        else:
+            if backup.exists(): shutil.rmtree(backup)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(); parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1]); parser.add_argument("--output", type=Path, default=Path("dist"))
+    args = parser.parse_args(); root=args.root.resolve(); output=args.output if args.output.is_absolute() else root/args.output
+    try: stage(root, output)
+    except (OSError, ValueError) as error: raise SystemExit(f"Preparación cancelada: {error}") from error
+    print(f"Sitio preparado: {output.resolve()}")
+
+
+if __name__ == "__main__": main()
