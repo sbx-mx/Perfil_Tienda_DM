@@ -2,6 +2,8 @@
 
 Dashboard estático para GitHub Pages construido con datos reales y un pipeline Python auditable. Los motores se validan por separado, se cruzan únicamente con llaves verificables y pueden aumentar o disminuir filas, CeCos y meses sin cambiar el código.
 
+La navegación superior lleva directamente a Resumen, Indicadores, Equipo y Mix y Ayuda. En pantallas pequeñas se oculta para conservar una vista limpia; los filtros y pestañas continúan disponibles.
+
 ## Motores independientes
 
 | Motor | Llave o cruce | Uso |
@@ -57,3 +59,5 @@ Abre `http://localhost:8000`.
 ## Limpieza del proyecto anterior
 
 Ejecuta manualmente el workflow **Eliminar archivos legados autorizados**. En modo `AUDITAR` sólo informa; con la confirmación exacta `ELIMINAR` borra únicamente las rutas de `scripts/obsolete-files.json`, incluido el Mix monolítico obsoleto.
+
+La limpieza incluye los archivos históricos de raíz `Store_Master_Audit.csv`, `data.js`, `README.txt`, `manifest.json`, `style.css` y los iconos duplicados. Conserva `styles.css`, `manifest.webmanifest` y `assets/`.

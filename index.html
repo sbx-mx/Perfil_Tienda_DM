@@ -17,6 +17,12 @@
       <img src="assets/icon.svg" alt="" width="42" height="42" />
       <span><small>STARBUCKS MÉXICO</small><strong>Perfil de Tienda</strong></span>
     </a>
+    <nav class="quick-nav" aria-label="Navegación principal">
+      <a href="#resumen">Resumen</a>
+      <a href="#indicadores">Indicadores</a>
+      <a href="#equipo-mix">Equipo y Mix</a>
+      <a href="#uso">Ayuda</a>
+    </nav>
     <div class="top-actions">
       <button class="button button-secondary" id="qualityButton" type="button">Calidad de datos</button>
       <button class="button button-primary" id="printButton" type="button">Exportar perfil</button>
@@ -42,11 +48,12 @@
       <div class="source-status" id="sourceStatus" aria-live="polite"><i></i><span>Cargando motores…</span></div>
     </section>
 
+    <span class="anchor-target" id="resumen" aria-hidden="true"></span>
     <section class="profile-hero skeleton" id="profileHero" aria-live="polite"></section>
 
     <section class="operational-strip" id="operationalStrip" aria-label="Resumen operativo"></section>
 
-    <nav class="pillar-tabs" aria-label="Pilares">
+    <nav class="pillar-tabs anchor-section" id="indicadores" aria-label="Pilares">
       <button type="button" data-pillar="Partner" class="active"><span>01</span>Partner</button>
       <button type="button" data-pillar="Cliente"><span>02</span>Cliente</button>
       <button type="button" data-pillar="Negocio"><span>03</span>Negocio</button>
@@ -58,12 +65,12 @@
     </section>
     <section class="metric-grid" id="metricGrid"></section>
 
-    <section class="insight-grid">
+    <section class="insight-grid anchor-section" id="equipo-mix">
       <article class="panel" id="partnerPanel"></article>
       <article class="panel" id="mixPanel"></article>
     </section>
 
-    <section class="panel instructions-panel">
+    <section class="panel instructions-panel anchor-section" id="uso">
       <div class="panel-head"><div><span class="eyebrow">TRAZABILIDAD</span><h2>Cómo leer este perfil</h2></div><button type="button" class="text-button" id="instructionsButton">Ver instrucciones completas</button></div>
       <div class="reading-grid">
         <div><i class="signal good"></i><strong>Verde</strong><p>Real supera AA/PPTO. En Labor, Costo y DT, menor es mejor.</p></div>

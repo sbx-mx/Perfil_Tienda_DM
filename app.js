@@ -238,6 +238,12 @@
     $('periodSelect').addEventListener('change',event=>{state.period=event.target.value;renderAll();});
     $('printButton').addEventListener('click',()=>window.print()); $('qualityButton').addEventListener('click',showAudit); $('instructionsButton').addEventListener('click',showInstructions);
     $('dialogClose').addEventListener('click',()=>$('detailsDialog').close());
+    const navigation=[...document.querySelectorAll('.quick-nav a')];
+    navigation.forEach(link=>link.addEventListener('click',()=>navigation.forEach(item=>item.classList.toggle('active',item===link))));
+    if ('IntersectionObserver' in window) {
+      const observer=new IntersectionObserver(entries=>entries.filter(entry=>entry.isIntersecting).forEach(entry=>navigation.forEach(link=>link.classList.toggle('active',link.hash===`#${entry.target.id}`))),{rootMargin:'-20% 0px -65%'});
+      ['resumen','indicadores','equipo-mix','uso'].map(id=>$(id)).filter(Boolean).forEach(section=>observer.observe(section));
+    }
   }
 
   async function start() {
@@ -247,7 +253,8 @@
       state.data=await dataResponse.json(); state.audit=await auditResponse.json();
       if (state.data.schemaVersion!==2 || state.audit.issueCount) throw new Error('El contrato de datos no superó la auditoría.');
       state.data.directory.sort((a,b)=>a.cc.localeCompare(b.cc));
-      fillOptions(state.data.profile['38101']?'38101':'');
+      const firstVerified=state.data.directory.find(item=>state.data.profile[item.cc]||state.data.business[item.cc]);
+      fillOptions(firstVerified?.cc||'');
       $('periodSelect').innerHTML='<option value="YTD">YTD</option>'+state.data.months.map(month=>`<option value="${month.id}">${month.period} · ${escapeHtml(month.label)}</option>`).join('');
       $('sourceStatus').classList.add('ready'); $('sourceStatus').querySelector('span').textContent=`${state.data.months.length} meses · ${state.audit.warningCount} advertencias controladas`;
       bindEvents(); renderAll();

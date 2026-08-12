@@ -1,4 +1,4 @@
-const CACHE = 'perfil-tienda-v9';
+const CACHE = 'perfil-tienda-v10';
 const CORE = ['./','index.html','styles.css','operational.css','app.js','manifest.webmanifest','assets/icon.svg'];
 self.addEventListener('install', event => event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(CORE))));
 self.addEventListener('activate', event => event.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(key => key !== CACHE).map(key => caches.delete(key))))));

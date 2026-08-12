@@ -140,6 +140,11 @@ def month_from_period(value: Any) -> int | None:
     return month if 1 <= month <= 12 else None
 
 
+def year_from_period(value: Any) -> int | None:
+    text = str(value or "").strip()
+    return int(text[:4]) if re.fullmatch(r"20\d{4}", text) else None
+
+
 def metric_format(header: str) -> str:
     key = normalize(header)
     if key in {"IPLH", "IPLH AA", "TPLH", "TPLH AA"}: return "decimal"
@@ -306,11 +311,12 @@ def build(root: Path, output: Path, audit_output: Path) -> tuple[dict[str, Any],
         profile[cc][str(month)] = values
 
     business: defaultdict[str, dict[str, dict[str, float | None]]] = defaultdict(dict)
-    business_unmatched = Counter(); business_duplicates = Counter(); business_months = Counter()
+    business_unmatched = Counter(); business_duplicates = Counter(); business_months = Counter(); business_years = Counter()
     for source_name, rows in (("business_aa", load_export_csv(paths["business_aa"])), ("business_real", load_export_csv(paths["business_real"]))):
         for row in rows:
-            month = month_from_period(row.get("Mes")); cc = clean_cc(row.get("Tiendas"))
+            month = month_from_period(row.get("Mes")); year = year_from_period(row.get("Mes")); cc = clean_cc(row.get("Tiendas"))
             if month is None or not cc: continue
+            if year is not None: business_years[year] += 1
             if cc not in directory_by_cc:
                 business_unmatched[cc] += 1; continue
             target = business[cc].setdefault(str(month), {})
@@ -422,16 +428,17 @@ def build(root: Path, output: Path, audit_output: Path) -> tuple[dict[str, Any],
         "issues": issues, "warnings": warnings, "sources": sources,
         "directory": {"rows": len(directory_rows), "validStores": len(directory)},
         "profile": {"rows": profile_sheet.max_row - 1, "matchedStores": len(profile), "months": dict(profile_months), "monthHeader": headers[month_column], "ccHeader": headers[cc_column], "minus100Blanked": dict(minus_100_blanked), "durationOutliersBlanked": dict(duration_blanked), "unmatched": dict(profile_unmatched)},
-        "business": {"matchedStores": len(business), "months": dict(business_months), "unmatched": dict(business_unmatched)},
+        "business": {"matchedStores": len(business), "months": dict(business_months), "years": dict(business_years), "unmatched": dict(business_unmatched)},
         "mix": {"sourceRows": mix_rows, "manifestRows": mix_manifest.get("rows"), "parts": len(mix_paths), "months": dict(mix_months), "matchedRows": mix_matched_rows, "matchedStores": len(mix), "invalidRows": mix_invalid_sales, "unmatchedNames": len(mix_unmatched), "unmatchedTop": dict(mix_unmatched.most_common(100))},
         "partners": {"uniqueEmployees": len(employees), "matchedStores": len(partners), "unmatched": dict(partner_unmatched)},
         "coverage": coverage,
     }
     if issues: raise ValueError(" | ".join(issues))
 
+    display_year = max(business_years) if business_years else datetime.now(UTC).year
     payload = {
         "schemaVersion": 2, "generatedAt": audit["generatedAt"],
-        "months": [{"id": month, "period": f"2026{month:02d}", "label": MONTH_LABELS[month - 1], "short": MONTH_LABELS[month - 1][:3]} for month in all_months],
+        "months": [{"id": month, "period": f"{display_year}{month:02d}", "label": MONTH_LABELS[month - 1], "short": MONTH_LABELS[month - 1][:3]} for month in all_months],
         "directory": directory, "metricHeaders": metric_headers, "graphs": graphs,
         "profile": profile, "business": business, "mix": mix, "partners": partners,
         "instructions": instruction_rows, "auditSummary": {"warnings": len(warnings), "generatedAt": audit["generatedAt"]},

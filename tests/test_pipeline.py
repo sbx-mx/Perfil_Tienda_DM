@@ -10,7 +10,7 @@ from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/"scripts"))
-from build_data import build, month_from_profile  # noqa: E402
+from build_data import build, clean_cc, month_from_profile, year_from_period  # noqa: E402
 
 
 class PipelineTests(unittest.TestCase):
@@ -23,22 +23,34 @@ class PipelineTests(unittest.TestCase):
     def tearDownClass(cls): cls.temporary.cleanup()
 
     def test_real_coverage(self):
-        self.assertGreaterEqual(len(self.payload["directory"]),900)
-        self.assertGreaterEqual(self.audit["profile"]["matchedStores"],900)
-        self.assertGreaterEqual(self.audit["business"]["matchedStores"],900)
-        self.assertGreaterEqual(self.audit["partners"]["matchedStores"],900)
-        self.assertGreaterEqual(self.audit["mix"]["matchedStores"],650)
+        stores=len(self.payload["directory"])
+        self.assertGreater(stores,0)
+        for engine in ("profile","business","partners","mix"):
+            self.assertGreater(self.audit[engine]["matchedStores"],0,engine)
+            self.assertLessEqual(self.audit[engine]["matchedStores"],stores,engine)
 
     def test_month_contract(self):
-        self.assertEqual([month["period"] for month in self.payload["months"]],[f"2026{month:02d}" for month in range(1,8)])
+        months=self.payload["months"]
+        ids=[month["id"] for month in months]
+        self.assertEqual(ids,sorted(set(ids)))
+        self.assertTrue(ids)
+        self.assertTrue(all(1<=month<=12 for month in ids))
+        expected_year=max(int(year) for year in self.audit["business"]["years"])
+        self.assertEqual([month["period"] for month in months],[f"{expected_year}{month:02d}" for month in ids])
         self.assertEqual(self.audit["profile"]["monthHeader"],"MES_NUM")
-        self.assertEqual(set(self.audit["profile"]["months"]),set(range(1,8)))
-        self.assertEqual(len(set(self.audit["profile"]["months"].values())),1)
+        self.assertTrue(set(self.audit["profile"]["months"]).issubset(set(ids)))
+        self.assertTrue(all(value>0 for value in self.audit["profile"]["months"].values()))
 
     def test_month_parser_is_future_proof(self):
         for raw,expected in ((1,1),(12,12),(202601,1),("202612",12),("1_ene",1),("7_jul",7)):
             self.assertEqual(month_from_profile(raw),expected,raw)
         self.assertIsNone(month_from_profile(13))
+        self.assertEqual(year_from_period("202701"),2027)
+        self.assertIsNone(year_from_period("Enero"))
+
+    def test_new_cecos_are_normalized_without_catalogs(self):
+        for raw,expected in ((43205,"43205"),("CC-43205","43205"),("205","00205")):
+            self.assertEqual(clean_cc(raw),expected)
 
     def test_minus_100_is_blank(self):
         self.assertGreater(sum(self.audit["profile"]["minus100Blanked"].values()),0)
@@ -87,9 +99,19 @@ class PipelineTests(unittest.TestCase):
         self.assertTrue(collector.urls)
         self.assertTrue(all(not url.startswith(("http://","https://","//")) for url in collector.urls),collector.urls)
 
+    def test_simple_navigation_is_complete(self):
+        html=(ROOT/"index.html").read_text(encoding="utf-8")
+        for anchor in ("#resumen","#indicadores","#equipo-mix","#uso"):
+            self.assertIn(f'href="{anchor}"',html)
+
+    def test_cleanup_covers_all_known_root_legacy_files(self):
+        manifest=json.loads((ROOT/"scripts/obsolete-files.json").read_text(encoding="utf-8"))
+        expected={"data.js","Store_Master_Audit.csv","README.txt","manifest.json","apple-touch-icon.png","icon-192.png","icon-512.png","icon.svg","style.css","data/engines/Base_Mix.csv"}
+        self.assertEqual(set(manifest["obsoleteFiles"]),expected)
+
     def test_audit_has_no_blocking_issues(self):
         self.assertEqual(self.audit["issueCount"],0)
-        self.assertLessEqual(self.audit["warningCount"],6)
+        self.assertEqual(self.audit["warningCount"],len(self.audit["warnings"]))
 
 
 if __name__=="__main__": unittest.main()

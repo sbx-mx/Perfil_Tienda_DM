@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 
 PROTECTED = {"index.html", "styles.css", "app.js", "data/dashboard.json", "data/audit.json"}
-ALLOWED = {"data.js", "Store_Master_Audit.csv", "README.txt", "manifest.json", "apple-touch-icon.png", "icon-192.png", "icon-512.png", "icon.svg", "data/engines/Base_Mix.csv"}
+ALLOWED = {"data.js", "Store_Master_Audit.csv", "README.txt", "manifest.json", "apple-touch-icon.png", "icon-192.png", "icon-512.png", "icon.svg", "style.css", "data/engines/Base_Mix.csv"}
 
 
 def candidates(root: Path, manifest: Path) -> list[tuple[str, Path]]:
