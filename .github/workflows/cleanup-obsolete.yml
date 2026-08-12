@@ -16,6 +16,9 @@ on:
       - "style.css"
       - "data/engines/Base_Mix.csv"
   workflow_dispatch:
+  workflow_run:
+    workflows: ["Validar y publicar Perfil de Tienda"]
+    types: [completed]
 
 concurrency:
   group: perfil-tienda-cleanup
@@ -26,6 +29,7 @@ permissions:
 
 jobs:
   cleanup:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
