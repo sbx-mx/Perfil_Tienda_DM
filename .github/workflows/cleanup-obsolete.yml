@@ -2,11 +2,10 @@ name: Eliminar archivos legados autorizados
 
 on:
   workflow_dispatch:
-    inputs:
-      confirm_delete:
-        description: Escribe ELIMINAR para aplicar; otro valor sólo audita
-        required: false
-        default: AUDITAR
+
+concurrency:
+  group: perfil-tienda-cleanup
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -19,10 +18,12 @@ jobs:
       contents: write
     steps:
       - name: Descargar repositorio
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
-      - name: Auditar alcance
-        run: python scripts/cleanup_obsolete.py
+      - name: Auditar alcance autorizado
+        run: |
+          python scripts/cleanup_obsolete.py
+          python scripts/cleanup_obsolete.py --print-candidates
 
       - name: Validar que el sitio no use archivos legados
         run: |
@@ -31,11 +32,9 @@ jobs:
           ! grep -R --line-number --fixed-strings 'Store_Master_Audit.csv' index.html app.js sw.js manifest.webmanifest
 
       - name: Eliminar sólo rutas autorizadas
-        if: ${{ inputs.confirm_delete == 'ELIMINAR' }}
         run: python scripts/cleanup_obsolete.py --apply --check-clean
 
       - name: Registrar limpieza
-        if: ${{ inputs.confirm_delete == 'ELIMINAR' }}
         run: |
           if git diff --quiet; then
             echo "No hay archivos legados presentes"
