@@ -1,366 +1,261 @@
-const D=window.PERFIL_DATA;
-let mode='tienda', current=null, charts={}, mixMonth='YTD', optionItems=[];
+(() => {
+  'use strict';
 
-const $=id=>document.getElementById(id);
-const months=D.months;
-const monthShort=months.map(m=>m.slice(0,3));
-const directory=D.directory||[];
-function normText(v){return String(v||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/[^A-Z0-9]+/g,' ').trim();}
-const byCeco=Object.fromEntries(directory.map(d=>[String(d.ceco),d]));
-const pctMetrics=new Set(['Rolling RY','Rolling RY AA','Labor','Labor PPTO','VMT%','VMT AA','OMT%','OMT AA','Conexion','Conexion AA','Calidad de la Bebida','Calidad de Bebida AA','Food Attach','Food Attach AA','SR','% SR AA','Venta Delivery','Delivery AA','Costo %','Costo % PPTO','EBITDA','EBITDA PPTO','ctc']);
+  const $ = id => document.getElementById(id);
+  const state = { data:null, audit:null, scope:'store', selection:'', period:'YTD', pillar:'Partner', productivity:'IPLH' };
+  const descriptions = {
+    Partner:'Personas, productividad y eficiencia de la tienda.',
+    Cliente:'Experiencia, conexión y comportamiento contra año anterior.',
+    Negocio:'Venta, presupuesto, tráfico, rentabilidad y tiempos operativos.',
+  };
+  const BUSINESS_GRAPHS = [
+    {id:'sales',pillar:'Negocio',title:'Venta',actual:'sales',reference:'salesBudget',referenceKind:'ppto',format:'currency',direction:'higher',ytd:'sum',subtitle:'Venta real vs presupuesto calculado desde la variación fuente'},
+    {id:'adt',pillar:'Negocio',title:'ADT',actual:'adt',reference:'adtAa',referenceKind:'aa',format:'number',direction:'higher',ytd:'average',subtitle:'Transacciones reales vs año anterior'},
+    {id:'aws',pillar:'Negocio',title:'AWS',actual:'aws',reference:null,referenceKind:'aa',format:'currency',direction:'higher',ytd:'average',subtitle:'Average Weekly Sales informado por el motor'},
+    {id:'ticket',pillar:'Negocio',title:'Ticket promedio',actual:'ticket',reference:'ticketAa',referenceKind:'aa',format:'currency1',direction:'higher',ytd:'average',subtitle:'Ticket real vs año anterior'},
+    {id:'omt-diff',pillar:'Negocio',title:'OMT vs AA',actual:'omtDiff',reference:null,referenceKind:'aa',format:'number',direction:'higher',ytd:'average',isDiffOnly:true,subtitle:'Diferencia informada por el motor; no se inventa referencia'},
+  ];
 
-function valid(v){return v!==null&&v!==undefined&&v!==''&&!Number.isNaN(Number(v));}
-function avg(a){const x=a.filter(valid).map(Number);return x.length?x.reduce((s,v)=>s+v,0)/x.length:null;}
-function sum(a){const x=a.filter(valid).map(Number);return x.length?x.reduce((s,v)=>s+v,0):null;}
-function fmt(v,type='num'){
-  if(!valid(v))return '—'; v=Number(v);
-  if(type==='moneyM')return '$'+(v/1000000).toFixed(1)+'M';
-  if(type==='moneyK')return '$'+(v/1000).toFixed(0)+'K';
-  if(type==='money')return '$'+(Math.abs(v)>=1000000?(v/1000000).toFixed(1)+'M':Math.abs(v)>=1000?(v/1000).toFixed(0)+'K':v.toFixed(0));
-  if(type==='ticket')return '$'+v.toFixed(1);
-  if(type==='pct')return (v*100).toFixed(1)+'%';
-  if(type==='pp')return (v*100>=0?'+':'')+(v*100).toFixed(1);
-  if(type==='sec')return sec(v);
-  return Math.abs(v)%1?Number(v).toFixed(1):String(Math.round(v));
-}
-function sec(v){if(!valid(v))return '—';let n=Math.abs(Number(v));let s=n>0&&n<1?Math.round(n*86400):Math.round(n);let h=Math.floor(s/3600),m=Math.floor((s%3600)/60),r=s%60;return h>0?`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(r).padStart(2,'0')}`:`${String(m).padStart(2,'0')}:${String(r).padStart(2,'0')}`;}
-function toSeconds(v){if(!valid(v))return null;let n=Number(v);return Math.abs(n)>0&&Math.abs(n)<1?n*86400:n;}
-function fmtDate(v){if(!v)return '—';const s=String(v).trim();let d=null;if(/^\d{4}-\d{2}-\d{2}/.test(s)){const [y,m,day]=s.slice(0,10).split('-');return `${day}/${m}/${y}`;}if(/^\d{1,2}\/\d{1,2}\/\d{2,4}/.test(s)){let [day,m,y]=s.split(/[\/ ]/);if(y.length===2)y='20'+y;return `${String(day).padStart(2,'0')}/${String(m).padStart(2,'0')}/${y}`;}d=new Date(s);return isNaN(d)?s:`${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;}
-function cls(v,inverse=false){if(!valid(v))return'neutral';return (inverse?Number(v)<=0:Number(v)>=0)?'pos':'neg';}
-function cleanLabel(s){return String(s||'').replace(/_/g,' ').trim();}
-function destroy(id){if(charts[id]){charts[id].destroy();delete charts[id];}}
-function makeChart(id,config){destroy(id);const ctx=$(id);if(ctx)charts[id]=new Chart(ctx,config);}
-function yTick(v,type){
-  if(type==='pct')return (v*100).toFixed(0)+'%';
-  if(type==='pp')return (v*100).toFixed(0);
-  if(type==='moneyM')return '$'+(v/1000000).toFixed(1)+'M';
-  if(type==='moneyK')return '$'+(v/1000).toFixed(0)+'K';
-  if(type==='ticket')return '$'+Number(v).toFixed(0);
-  if(type==='sec')return sec(v);
-  return Math.abs(v)%1?Number(v).toFixed(1):v;
-}
-function chartOpt(type){return{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},plugins:{legend:{position:'bottom',labels:{boxWidth:16,usePointStyle:true}},tooltip:{callbacks:{label:c=>`${c.dataset.label}: ${fmt(c.raw,type)}`}}},scales:{y:{beginAtZero:false,ticks:{maxTicksLimit:6,callback:v=>yTick(v,type)}},x:{grid:{display:false}}}};}
-function resolveSelection(){
-  const raw=$('selector').value.trim();
-  if(mode==='tienda'){
-    const c=(raw.match(/^\s*(\d{5})/)||[])[1];
-    if(c&&byCeco[c])return c;
-    const match=directory.find(d=>d.tienda.toLowerCase()===raw.toLowerCase())||directory.find(d=>raw.toLowerCase().includes(d.tienda.toLowerCase()));
-    return match?String(match.ceco):null;
+  const valid = value => typeof value === 'number' && Number.isFinite(value);
+  const avg = values => { const clean=values.filter(valid); return clean.length ? clean.reduce((sum,value)=>sum+value,0)/clean.length : null; };
+  const sum = values => { const clean=values.filter(valid); return clean.length ? clean.reduce((total,value)=>total+value,0) : null; };
+  const escapeHtml = value => String(value ?? '').replace(/[&<>'"]/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]));
+  const normalize = value => String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/[^A-Z0-9]+/g,' ').trim();
+
+  function fmt(value, type='number', signed=false) {
+    if (!valid(value)) return '—';
+    const sign = signed && value > 0 ? '+' : '';
+    if (type === 'percent') return `${sign}${(value*100).toFixed(1)}%`;
+    if (type === 'currency') return `${sign}${new Intl.NumberFormat('es-MX',{style:'currency',currency:'MXN',maximumFractionDigits:0}).format(value)}`;
+    if (type === 'currency1') return `${sign}${new Intl.NumberFormat('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:1,maximumFractionDigits:1}).format(value)}`;
+    if (type === 'decimal') return `${sign}${value.toFixed(1)}`;
+    if (type === 'duration') {
+      const seconds=Math.abs(Math.round(value)), minutes=Math.floor(seconds/60), rest=seconds%60;
+      return `${signed ? (value<0?'-':value>0?'+':'') : ''}${String(minutes).padStart(2,'0')}:${String(rest).padStart(2,'0')}`;
+    }
+    return `${sign}${new Intl.NumberFormat('es-MX',{maximumFractionDigits:1}).format(value)}`;
   }
-  return raw;
-}
-function scopeCecos(){
-  if(mode==='tienda')return current?[String(current)]:[];
-  if(mode==='dm')return directory.filter(x=>x.dm===current).map(x=>String(x.ceco));
-  return directory.filter(x=>x.rd===current).map(x=>String(x.ceco));
-}
-function scopeDMs(){
-  if(mode==='dm')return [current];
-  if(mode==='rd')return [...new Set(directory.filter(x=>x.rd===current).map(x=>x.dm).filter(Boolean))];
-  const d=byCeco[current]; return d&&d.dm?[d.dm]:[];
-}
-function rowsByCeco(source,cecos){const set=new Set(cecos.map(String));return (source||[]).filter(r=>set.has(String(r.ceco)));}
-function rowsByDM(source,dms){const set=new Set((dms||[]).map(normText));return (source||[]).filter(r=>set.has(normText(r.dm)));}
-function groupByMonth(source,metric,agg='avg',key='ceco'){
-  const rows=key==='dm'?rowsByDM(source,scopeDMs()):rowsByCeco(source,scopeCecos());
-  const out=[]; for(let m=1;m<=12;m++){const vals=rows.filter(r=>r.m===m).map(r=>r[metric]);out.push(agg==='sum'?sum(vals):avg(vals));} return out;
-}
-function closedMaxMonth(){
-  const base=[...(D.venta||[]),...(D.pcs||[]),...(D.adt||[]),...(D.ticket||[])].map(x=>x.m).filter(Boolean);
-  const m=Math.max(...base);
-  return isFinite(m)?m:12;
-}
-function closedSource(source){const max=closedMaxMonth();return (source||[]).filter(r=>!r.m||r.m<=max);}
-function selectedLabel(){
-  if(mode==='tienda'){const d=byCeco[current]||{};return `${d.ceco||current} · ${d.tienda||current}`;}
-  return current||'';
-}
-function setSelectorValue(v,auto=false){$('selector').value=v||''; if(auto)applySelection();}
-function exportPDF(){
-  const label=String(mode==='tienda'?(byCeco[current]?.tienda||current):current||'Perfil').replace(/[\/:*?"<>|]+/g,' ').replace(/\s+/g,' ').trim();
-  const period=($('periodo')?.textContent||'YTD').replace(/\s*·\s*/g,'_').replace(/\s+/g,'_');
-  document.title=`Perfil_${mode.toUpperCase()}_${label}_${period}`;
-  window.print();
-}
-function latest(vals){for(let i=vals.length-1;i>=0;i--)if(valid(vals[i]))return vals[i];return null;}
-function ytd(vals,agg='avg'){return agg==='sum'?sum(vals):avg(vals);}
-function monthlyDiff(base,compare,mode='minus'){return base.map((v,i)=>valid(v)&&valid(compare[i])?(mode==='aaMinus'?compare[i]-v:v-compare[i]):null);}
-function chartCard(cfg){
-  const id='c'+Math.random().toString(36).slice(2);
-  const vals=groupByMonth(cfg.source,cfg.metric,cfg.agg||'avg',cfg.key||'ceco');
-  const type=cfg.type||(pctMetrics.has(cfg.metric)?'pct':'num');
-  const k=cfg.ytd===false?latest(vals):(cfg.ytdAgg==='avg'?avg(vals):ytd(vals,cfg.agg||'avg'));
-  let diffs=null,diffY=null;
-  if(cfg.diffMetric){const comp=groupByMonth(cfg.source,cfg.diffMetric,cfg.diffAgg||cfg.agg||'avg',cfg.key||'ceco');diffs=monthlyDiff(vals,comp,cfg.diffMode);diffY=avg(diffs);}
-  else if(cfg.diffSourceMetric){diffs=groupByMonth(cfg.diffSource||cfg.source,cfg.diffSourceMetric,cfg.diffAgg||'avg',cfg.diffKey||cfg.key||'ceco');diffY=avg(diffs);}
-  const diffType=cfg.diffType||type;
-  const chips=(diffs||[]).map((d,i)=>valid(d)?`<span class="pill ${cls(d,cfg.inverseDiff)}">${monthShort[i]} ${fmt(cfg.diffAbs?Math.abs(d):d,diffType)}</span>`:'').join('');
-  const html=`<article class="card"><div class="card-head"><div><h3>${cfg.title}</h3><div class="note">${cfg.subtitle||'Tendencia mensual + YTD'}</div></div><div><div class="kpi">${fmt(k,type)}</div><div class="note">${cfg.ytd===false?'Último dato':'YTD'}</div></div></div><div class="canvas-wrap"><canvas id="${id}"></canvas></div>${valid(diffY)?`<span class="pill ${cls(diffY,cfg.inverseDiff)}">Dif YTD ${fmt(cfg.diffAbs?Math.abs(diffY):diffY,diffType)}</span>`:''}${diffs?`<div class="pill-row">${chips}</div>`:''}</article>`;
-  setTimeout(()=>{const ds=[{label:cfg.title,data:vals,type:cfg.bar?'bar':'line',tension:.35,fill:false,borderWidth:3,pointRadius:3,borderColor:'#00754a',backgroundColor:'rgba(0,117,74,.16)'}];if(diffs)ds.push({label:'Dif',data:diffs.map(x=>cfg.diffAbs&&valid(x)?Math.abs(x):x),type:'bar',borderWidth:0,backgroundColor:'rgba(0,117,74,.14)'});makeChart(id,{type:cfg.bar?'bar':'line',data:{labels:monthShort,datasets:ds},options:chartOpt(type)});},0);
-  return html;
-}
-function compareCard(title,source,a,b,opt={}){
-  const id='c'+Math.random().toString(36).slice(2);
-  const va=groupByMonth(source,a,opt.agg||'avg'), vb=groupByMonth(source,b,opt.agg||'avg'), d=monthlyDiff(va,vb);
-  const type=opt.type||'pct', y=ytd(va,opt.agg||'avg'), yb=ytd(vb,opt.agg||'avg'), yd=valid(y)&&valid(yb)?y-yb:null;
-  const chips=d.map((x,i)=>valid(x)?`<span class="pill ${cls(x,opt.inverseDiff)}">${monthShort[i]} ${fmt(x,opt.diffType||type)}</span>`:'').join('');
-  const html=`<article class="card"><div class="card-head"><div><h3>${title}</h3><div class="note">Real vs referencia</div></div><div><div class="kpi">${fmt(y,type)}</div><div class="note">Ref ${fmt(yb,type)}</div></div></div><div class="canvas-wrap"><canvas id="${id}"></canvas></div>${valid(yd)?`<span class="pill ${cls(yd,opt.inverseDiff)}">Dif ${fmt(yd,opt.diffType||type)}</span>`:''}<div class="pill-row">${chips}</div></article>`;
-  setTimeout(()=>makeChart(id,{type:'line',data:{labels:monthShort,datasets:[{label:'Real',data:va,tension:.35,borderWidth:3,borderColor:'#00754a'},{label:'Referencia',data:vb,tension:.35,borderWidth:2,borderColor:'#8b6f47'},{label:'Dif',data:d,type:'bar',backgroundColor:'rgba(0,117,74,.14)'}]},options:chartOpt(type)}),0);
-  return html;
-}
-function setMode(m){
-  mode=m;
-  ['Tienda','DM','RD'].forEach(x=>$('tab'+x).classList.toggle('active',m===x.toLowerCase()));
-  $('selector').placeholder=m==='tienda'?'Buscar o elige tienda por CeCo / nombre...':m==='dm'?'Buscar o elige DM...':'Buscar o elige RD...';
-  fillOptions();
-  applySelection();
-}
-function fillOptions(){
-  if(mode==='tienda')optionItems=directory.map(d=>`${d.ceco} · ${d.tienda}`).sort();
-  if(mode==='dm')optionItems=[...new Set(directory.map(x=>x.dm).filter(Boolean))].sort();
-  if(mode==='rd')optionItems=[...new Set(directory.map(x=>x.rd).filter(Boolean))].sort();
-  $('options').innerHTML=optionItems.map(x=>`<option value="${x}"></option>`).join('');
-  const sel=$('selectorSelect');
-  if(sel){sel.innerHTML=optionItems.map(x=>`<option value="${x}">${x}</option>`).join('');}
-  if(!optionItems.includes($('selector').value))$('selector').value=optionItems[0]||'';
-  if(sel)sel.value=$('selector').value;
-  fillMonthFilter();
-}
-function fillMonthFilter(){const sel=$('mixMonth');if(!sel)return;sel.innerHTML=`<option value="YTD">YTD</option>`+months.map((m,i)=>`<option value="${i+1}">${m}</option>`).join('');sel.value=mixMonth;}
-function applySelection(){current=resolveSelection(); const sel=$('selectorSelect'); if(sel&&optionItems.includes($('selector').value))sel.value=$('selector').value; if(current)render();}
-function period(){const all=[...rowsByCeco(D.pcs,scopeCecos()),...rowsByCeco(D.venta,scopeCecos()),...rowsByCeco(D.adt,scopeCecos()),...rowsByCeco(D.ticket,scopeCecos())].map(x=>x.m).filter(Boolean);let a=Math.min(...all),b=Math.max(...all);$('periodo').textContent=(isFinite(a)?months[a-1]:'Mes inicio')+' a '+(isFinite(b)?months[b-1]:'Último dato')+' · YTD';}
-function baseItem(k,v){return `<div class="base-item"><small>${k}</small><b>${v||'—'}</b></div>`;}
-function countMap(arr){const o={};arr.filter(Boolean).forEach(x=>o[x]=(o[x]||0)+1);return o;}
-function topCount(o){const e=Object.entries(o).sort((a,b)=>b[1]-a[1])[0];return e?`${e[0]} · ${e[1]}`:'—';}
-function renderTypeBars(rows){if(mode==='tienda'){$('typeVisualCard').classList.add('hidden');return;}$('typeVisualCard').classList.remove('hidden');const counts=countMap(rows.map(x=>x.tipo5));const max=Math.max(...Object.values(counts),1);$('typeBars').innerHTML=Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0,8).map(([k,v])=>`<div class="type-row"><span title="${k}">${k}</span><div class="type-bar"><span style="width:${(v/max*100).toFixed(0)}%"></span></div><b>${v}</b></div>`).join('');}
-function renderBase(){const cecos=scopeCecos(), rows=directory.filter(x=>cecos.includes(String(x.ceco))), d=rows[0]||{};if(mode==='tienda'){$('baseGrid').innerHTML=[['Apertura',fmtDate(d.apertura)],['Tipo tienda 5',d.tipo5],['DM',d.dm],['Región',d.region],['Tier',d.tier],['Seating',`${d.seating||'—'}${d.seats_num!=null?' · '+d.seats_num:''}`]].map(x=>baseItem(x[0],x[1])).join('');$('staffCard').classList.remove('hidden');loadStaff();}else{const types=countMap(rows.map(x=>x.tipo5)), seating=countMap(rows.map(x=>x.seating)), tiers=countMap(rows.map(x=>x.tier));$('baseGrid').innerHTML=[['# tiendas',rows.length],['Tipo principal',topCount(types)],['Seating',topCount(seating)],['Tier principal',topCount(tiers)],['Región',mode==='rd'?[...new Set(rows.map(x=>x.region))].join(', '):[...new Set(rows.map(x=>x.region))].join(', ')],['División',[...new Set(rows.map(x=>x.division))].join(', ')]].map(x=>baseItem(x[0],x[1])).join('');$('staffCard').classList.add('hidden');}renderTypeBars(rows);}
-function renderMixOnly(){mixMonth=$('mixMonth').value;renderMix();}
-function renderMix(){const rows=rowsByCeco(D.mix,scopeCecos()).filter(x=>mixMonth==='YTD'||x.m===Number(mixMonth));const order={},cat={};rows.forEach(r=>{Object.entries(r.order||{}).forEach(([k,v])=>order[k]=(order[k]||0)+v);Object.entries(r.category||{}).forEach(([k,v])=>cat[k]=(cat[k]||0)+v);});const n=Math.max(rows.length,1);Object.keys(order).forEach(k=>order[k]/=n);Object.keys(cat).forEach(k=>cat[k]/=n);iconCards('orderIconCards',order,'order');iconCards('categoryIconCards',cat,'cat');dough('chartOrder',order);dough('chartCategory',cat);}
-function iconFor(k,type){const s=k.toLowerCase();if(type==='order'){if(s.includes('drive'))return'DT';if(s.includes('pick')||s.includes('delivery'))return'PD';if(s.includes('lobby'))return'LB';}else{if(s.includes('filtrado')||s.includes('café')||s.includes('cafe'))return'CF';if(s.includes('espresso'))return'ESP';if(s.includes('food'))return'FD';if(s.includes('cbs'))return'CBS';if(s.includes('otro'))return'OT';}return'•';}
-function mixColor(k,i,type){
-  const s=normText(k);
-  const order={'DRIVE THRU':'#006241','LOBBY':'#8B6F47','PICK UP DELIVERY':'#00A862','PICK UP DEL':'#00A862'};
-  const cat={'CAFE FILTRADO':'#6F4E37','CBS':'#00754A','ESPRESSO':'#CBA258','FOOD':'#D4E9E2','OTRO':'#1E3932'};
-  const pal=['#006241','#8B6F47','#00A862','#CBA258','#1E3932','#D4E9E2'];
-  if(type==='order'){
-    if(s.includes('DRIVE'))return order['DRIVE THRU'];
-    if(s.includes('LOBBY'))return order.LOBBY;
-    if(s.includes('PICK')||s.includes('DELIVERY'))return order['PICK UP DELIVERY'];
-  }else{
-    if(s.includes('FILTRADO')||s.includes('CAFE'))return cat['CAFE FILTRADO'];
-    if(s.includes('CBS'))return cat.CBS;
-    if(s.includes('ESPRESSO'))return cat.ESPRESSO;
-    if(s.includes('FOOD'))return cat.FOOD;
-    if(s.includes('OTRO'))return cat.OTRO;
+  const formatDate = value => value ? new Intl.DateTimeFormat('es-MX',{day:'2-digit',month:'short',year:'numeric',timeZone:'UTC'}).format(new Date(`${value}T00:00:00Z`)) : '—';
+  const metricIndex = header => state.data.metricHeaders.indexOf(header);
+
+  function scopeOptions() {
+    const directory=state.data.directory;
+    if (state.scope === 'store') return directory.map(item=>({value:item.cc,label:`${item.cc} · ${item.store}`,search:`${item.cc} ${item.store} ${item.dm} ${item.region}`}));
+    if (state.scope === 'dm') return [...new Set(directory.map(item=>item.dm).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es')).map(value=>({value,label:value,search:value}));
+    return [...new Set(directory.map(item=>item.region).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es')).map(value=>({value,label:value,search:value}));
   }
-  return pal[i%pal.length];
-}
-function iconCards(id,obj,type){
-  let entries=Object.entries(obj).filter(([k,v])=>valid(v)&&v>0);
-  if(type==='cat'){
-    const required=['Café filtrado','CBS','Espresso','Food','Otro'];
-    required.forEach(k=>{if(!entries.some(([e])=>normText(e)===normText(k)))entries.push([k,0]);});
+
+  function scopeStores() {
+    if (state.scope === 'store') return state.data.directory.filter(item=>item.cc===state.selection);
+    if (state.scope === 'dm') return state.data.directory.filter(item=>item.dm===state.selection);
+    return state.data.directory.filter(item=>item.region===state.selection);
   }
-  entries=entries.sort((a,b)=>b[1]-a[1]);
-  $(id).innerHTML=entries.map(([k,v],i)=>`<div class="icon-card"><span class="icon-badge" style="background:${mixColor(k,i,type)}">${iconFor(k,type)}</span><div><b>${cleanLabel(k)}</b><small>${fmt(v,'pct')}</small></div></div>`).join('')||'<div class="note">Sin data disponible</div>';
-}
-function dough(id,obj){const labels=Object.keys(obj).filter(k=>valid(obj[k])&&obj[k]>0),vals=labels.map(k=>obj[k]);makeChart(id,{type:'doughnut',data:{labels,datasets:[{data:vals,borderWidth:2,backgroundColor:labels.map((k,i)=>mixColor(k,i,id==='chartOrder'?'order':'cat'))}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12}},tooltip:{callbacks:{label:c=>`${c.label}: ${fmt(c.raw,'pct')}`}}}}});}
-function metricValue(source,metric,agg='avg',key='ceco'){return ytd(groupByMonth(source,metric,agg,key),agg);}function metricDiff(source,a,b,inverse=false){const va=groupByMonth(source,a),vb=groupByMonth(source,b),d=avg(monthlyDiff(va,vb));return {raw:d,score:valid(d)?(inverse?-d:d):null};}
-function status(metric,value,diff){if(metric==='conexion')return value>=.60?'good':value>=.55?'warn':'bad';if(metric==='bebida')return value>=.71?'good':value>=.65?'warn':'bad';if(metric==='labor'||metric==='costo'||metric==='dt')return valid(diff)&&diff<=0?'good':'bad';if(metric==='ebitda')return valid(diff)&&diff>=0?'good':'bad';return 'good';}
-function insightFmt(name,raw){
-  if(name==='DT')return sec(Math.abs(toSeconds(raw)||0));
-  return fmt(raw,'pp')+' pp';
-}
-function renderExecutive(){
-  const ctcSrc=closedSource(mode==='tienda'?D.ctc:D.ctc_dm);
-  const conn=metricValue(D.pcs,'Conexion'), beb=metricValue(D.pcs,'Calidad de la Bebida'), labor=metricValue(D.pcs,'Labor'), ebitda=metricValue(D.pcs,'EBITDA');
-  const aws=avg(groupByMonth(D.venta,'aws','avg'));
-  const ctcVal=mode==='tienda'?metricValue(ctcSrc,'ctc'):metricValue(ctcSrc,'ctc','avg','dm');
-  const dl=metricDiff(D.pcs,'Labor','Labor PPTO',true).raw, de=metricDiff(D.pcs,'EBITDA','EBITDA PPTO').raw;
-  const kpis=[['Conexión',fmt(conn,'pct'),status('conexion',conn),'Experiencia'],['Bebida',fmt(beb,'pct'),status('bebida',beb),'Calidad'],['Labor',fmt(labor,'pct'),status('labor',labor,dl),'Vs ppto'],['EBITDA',fmt(ebitda,'pct'),status('ebitda',ebitda,de),'Vs ppto'],['AWS',fmt(aws,'moneyK'),'good','Venta semanal'],['CTC',fmt(ctcVal,'pct'),'good','Cada Taza Cuenta']];
-  const items=[['Conexión',metricDiff(D.pcs,'Conexion','Conexion AA')],['Bebida',metricDiff(D.pcs,'Calidad de la Bebida','Calidad de Bebida AA')],['Food Attach',metricDiff(D.pcs,'Food Attach','Food Attach AA')],['SR',metricDiff(D.pcs,'SR','% SR AA')],['Labor',metricDiff(D.pcs,'Labor','Labor PPTO',true)],['Costo',metricDiff(D.pcs,'Costo %','Costo % PPTO',true)],['EBITDA',metricDiff(D.pcs,'EBITDA','EBITDA PPTO')],['DT',metricDiff(D.pcs,'DT Time','Tiempo DT AA',true)]];
-  const good=items.filter(x=>valid(x[1].score)&&x[1].score>0).sort((a,b)=>b[1].score-a[1].score).slice(0,3);
-  const risk=items.filter(x=>valid(x[1].score)&&x[1].score<0).sort((a,b)=>a[1].score-b[1].score).slice(0,3);
-  $('executivePanel').innerHTML=`<div class="exec-title"><div><h2>Resumen Ejecutivo</h2><p class="note">Lectura rápida para toma de decisiones</p></div><span class="pill neutral">${scopeCecos().length} tienda(s)</span></div><div class="exec-grid">${kpis.map(k=>`<div class="exec-kpi"><small>${k[0]}</small><b>${k[1]}</b><span class="status ${k[2]}">${k[3]}</span></div>`).join('')}</div><div class="insight-grid"><div class="insight-box"><h4>Fortalezas</h4><ul>${good.length?good.map(x=>`<li>${x[0]} · ${insightFmt(x[0],x[1].raw)}</li>`).join(''):'<li>Sin variaciones positivas relevantes</li>'}</ul></div><div class="insight-box"><h4>Oportunidades</h4><ul>${risk.length?risk.map(x=>`<li>${x[0]} · ${insightFmt(x[0],x[1].raw)}</li>`).join(''):'<li>Sin alertas críticas con datos disponibles</li>'}</ul></div></div>`;
-}
 
-
-function dtCompareCard(){
-  const id='c'+Math.random().toString(36).slice(2);
-  const dtRaw=groupByMonth(D.pcs,'DT Time');
-  const aaRaw=groupByMonth(D.pcs,'Tiempo DT AA');
-  const dt=dtRaw.map(toSeconds), aa=aaRaw.map(toSeconds);
-  const dif=dt.map((v,i)=>valid(v)&&valid(aa[i])?Math.abs(v-aa[i]):null);
-  const state=dt.map((v,i)=>valid(v)&&valid(aa[i])?v<=aa[i]:null);
-  const yDt=avg(dt), yAa=avg(aa), yDif=valid(yDt)&&valid(yAa)?Math.abs(yDt-yAa):null;
-  const better=valid(yDt)&&valid(yAa)?yDt<=yAa:null;
-  const chips=dif.map((x,i)=>valid(x)?`<span class="pill ${state[i]?'pos':'neg'}">${monthShort[i]} ${sec(x)}</span>`:'').join('');
-  const html=`<article class="card"><div class="card-head"><div><h3>DT Time</h3><div class="note">DT vs AA · menor tiempo es verde</div></div><div><div class="kpi ${better?'':'neg-text'}">${sec(yDt)}</div><div class="note">Promedio YTD</div></div></div><div class="dt-summary"><span class="pill neutral">DT ${sec(yDt)}</span><span class="pill neutral">AA ${sec(yAa)}</span><span class="pill ${better?'pos':'neg'}">Dif ${sec(yDif)}</span></div><div class="canvas-wrap"><canvas id="${id}"></canvas></div><div class="pill-row">${chips}</div></article>`;
-  setTimeout(()=>makeChart(id,{type:'line',data:{labels:monthShort,datasets:[{label:'DT Time',data:dt,tension:.35,borderWidth:3,borderColor:'#006241',pointRadius:3},{label:'DT AA',data:aa,tension:.35,borderWidth:2,borderColor:'#8B6F47',pointRadius:3},{label:'Dif seg',data:dif,type:'bar',backgroundColor:state.map(v=>v===null?'rgba(216,208,196,.25)':v?'rgba(0,117,74,.18)':'rgba(194,65,12,.18)'),borderWidth:0}]},options:chartOpt('sec')}),0);
-  return html;
-}
-
-
-function renderSections(){ $('partnerGrid').innerHTML=chartCard({title:'Rolling RY',source:D.pcs,metric:'Rolling RY',ytd:false,diffMetric:'Rolling RY AA',diffMode:'aaMinus',diffType:'pp',subtitle:'12M atrás · objetivo <30%'})+chartCard({title:'IPLH',source:D.pcs,metric:'IPLH'})+chartCard({title:'TPLH',source:D.pcs,metric:'TPLH'})+chartCard({title:'Labor %',source:D.pcs,metric:'Labor',diffMetric:'Labor PPTO',diffType:'pp',inverseDiff:true,subtitle:'Menor a presupuesto es ahorro'})+chartCard({title:'ICA Score',source:D.pcs,metric:'ICA Score',type:'num',bar:true,subtitle:'Auditorías disponibles'});$('customerGrid').innerHTML=chartCard({title:'Venta Mes',source:D.venta,metric:'venta_mes',type:'moneyM',agg:'sum',bar:true,subtitle:'Venta mensual'})+chartCard({title:'AWS',source:D.venta,metric:'aws',type:'moneyK',agg:'avg',ytdAgg:'avg',bar:true,subtitle:'Average Weekly Sales'})+chartCard({title:'ADT',source:D.adt,metric:'adt',type:'num',diffSourceMetric:'adt_diff',diffType:'num',subtitle:'ADT real + dif vs AA'})+chartCard({title:'Ticket Promedio',source:D.ticket,metric:'ticket',type:'ticket',diffSourceMetric:'ticket_diff',diffSource:D.ticket,diffType:'pp',subtitle:'Ticket + dif vs AA'})+chartCard({title:'VMT',source:D.pcs,metric:'VMT%'})+chartCard({title:'OMT',source:D.pcs,metric:'OMT%'})+chartCard({title:'Conexión',source:D.pcs,metric:'Conexion',diffMetric:'Conexion AA',diffType:'pp'})+chartCard({title:'Calidad Bebida',source:D.pcs,metric:'Calidad de la Bebida',diffMetric:'Calidad de Bebida AA',diffType:'pp'})+chartCard({title:'Food Attach',source:D.pcs,metric:'Food Attach',diffMetric:'Food Attach AA',diffType:'pp'})+chartCard({title:'Segundas Ventas',source:D.pcs,metric:'Segundas Ventas',type:'num'})+chartCard({title:'SR',source:D.pcs,metric:'SR',diffMetric:'% SR AA',diffType:'pp'})+chartCard({title:'Cada Taza Cuenta',source:closedSource(mode==='tienda'?D.ctc:D.ctc_dm),metric:'ctc',type:'pct',key:mode==='tienda'?'ceco':'dm',subtitle:'Participación mensual'});$('businessGrid').innerHTML=compareCard('Venta Delivery',D.pcs,'Venta Delivery','Delivery AA',{type:'pct',diffType:'pp'})+compareCard('Costo %',D.pcs,'Costo %','Costo % PPTO',{inverseDiff:true,type:'pct',diffType:'pp'})+compareCard('EBITDA',D.pcs,'EBITDA','EBITDA PPTO',{type:'pct',diffType:'pp'})+dtCompareCard();}
-function render(){Object.keys(charts).forEach(destroy);const cecos=scopeCecos(), rows=directory.filter(x=>cecos.includes(String(x.ceco))), d=rows[0]||{};period();let title=current, sub='';if(mode==='tienda'){title=d.tienda||current;sub=`Gerente: ${d.gerente||'Vacante'}`;$('photoLabel').textContent='Colocar foto gerente';}else if(mode==='dm'){sub=`Región: ${[...new Set(rows.map(x=>x.region))].join(', ')}`;$('photoLabel').textContent='Colocar foto DM';}else{sub=`División: ${[...new Set(rows.map(x=>x.division))].join(', ')}`;$('photoLabel').textContent='Colocar foto RD';}$('profileName').textContent=title;$('profileSub').textContent=sub;renderBase();renderMix();renderExecutive();renderSections();restorePhoto();}
-function photoKey(){return 'perfil_photo_v5_'+mode+'_'+current;}function loadPhoto(e){const f=e.target.files[0];if(!f||!current)return;const r=new FileReader();r.onload=()=>{localStorage.setItem(photoKey(),r.result);$('photoPreview').src=r.result;};r.readAsDataURL(f);}function resetPhoto(){if(current)localStorage.removeItem(photoKey());$('photoPreview').removeAttribute('src');}function restorePhoto(){const v=current&&localStorage.getItem(photoKey());if(v)$('photoPreview').src=v;else $('photoPreview').removeAttribute('src');}
-function staffKey(){return 'staff_v5_'+current;}function saveStaff(){if(!current)return;localStorage.setItem(staffKey(),JSON.stringify({asm:$('staffASM').value,ss:$('staffSS').value,bb:$('staffBB').value}));}function loadStaff(){try{const v=JSON.parse(localStorage.getItem(staffKey())||'{}');$('staffASM').value=v.asm??1;$('staffSS').value=v.ss??1;$('staffBB').value=v.bb??3;}catch(e){}}
-fillOptions();applySelection();
-
-/* ================= Perfil RD · DM · Tienda 6.0 =================
-   Ajustes finos: buscador intuitivo, AWS promedio semanal real,
-   DT con lectura de mejora/oportunidad, ticket con eje de diferencia
-   separado y resumen ejecutivo más consistente.
-================================================================= */
-
-function optionMeta(v){
-  if(mode==='tienda'){
-    const c=(String(v).match(/^\s*(\d{5})/)||[])[1];
-    const d=byCeco[c]||{};
-    return [d.dm,d.region].filter(Boolean).join(' · ');
+  function fillOptions(preferred='') {
+    const options=scopeOptions();
+    $('profileOptions').innerHTML=options.map(item=>`<option value="${escapeHtml(item.label)}"></option>`).join('');
+    let option=options.find(item=>item.value===preferred) || options.find(item=>item.value===state.selection) || options[0];
+    if (!option) return;
+    state.selection=option.value; $('profileSearch').value=option.label;
+    $('profileSearch').placeholder=state.scope==='store'?'Busca por CeCo o tienda':state.scope==='dm'?'Busca un DM':'Busca una región';
   }
-  if(mode==='dm'){
-    const rows=directory.filter(x=>x.dm===v);
-    const regs=[...new Set(rows.map(x=>x.region).filter(Boolean))].slice(0,2).join(', ');
-    return `${rows.length} tienda(s)${regs?' · '+regs:''}`;
+
+  function resolveSearch() {
+    const raw=$('profileSearch').value.trim(), normalized=normalize(raw), options=scopeOptions();
+    const exact=options.find(item=>normalize(item.label)===normalized || normalize(item.value)===normalized);
+    const ceco=state.scope==='store' ? (raw.match(/\b\d{5}\b/)||[])[0] : null;
+    const match=exact || (ceco ? options.find(item=>item.value===ceco) : null) || options.find(item=>normalize(item.search).includes(normalized));
+    if (!match) { $('profileSearch').setCustomValidity('Selecciona una coincidencia válida.'); $('profileSearch').reportValidity(); return false; }
+    $('profileSearch').setCustomValidity(''); state.selection=match.value; $('profileSearch').value=match.label; return true;
   }
-  const rows=directory.filter(x=>x.rd===v);
-  const divs=[...new Set(rows.map(x=>x.division).filter(Boolean))].join(', ');
-  return `${rows.length} tienda(s)${divs?' · '+divs:''}`;
-}
-function showOptionPanel(){updateOptionPanel(true);}
-function hideOptionPanel(){const p=$('optionsPanel'); if(p)p.classList.remove('open');}
-function toggleOptionPanel(){const p=$('optionsPanel'); if(!p)return; if(p.classList.contains('open'))hideOptionPanel(); else showOptionPanel();}
-function updateOptionPanel(force=false){
-  const p=$('optionsPanel'); if(!p)return;
-  const q=normText($('selector').value);
-  const terms=q.split(' ').filter(Boolean);
-  const scored=optionItems.map(v=>{
-    const n=normText(v+' '+optionMeta(v));
-    let score=terms.length?terms.reduce((s,t)=>s+(n.includes(t)?1:0),0):1;
-    if(q&&n.startsWith(q))score+=3;
-    if(q&&n.includes(q))score+=2;
-    return {v,score};
-  }).filter(x=>force||!q||x.score>0).sort((a,b)=>b.score-a.score||a.v.localeCompare(b.v)).slice(0,60);
-  if(!scored.length){p.innerHTML='<div class="option-empty">Sin coincidencias. Intenta con CeCo, tienda, DM o RD.</div>';p.classList.add('open');return;}
-  p.innerHTML=scored.map((x,i)=>`<div class="option-row ${i===0?'active':''}" data-value="${String(x.v).replace(/&/g,'&amp;').replace(/"/g,'&quot;')}" onclick="chooseOption(this.dataset.value)"><span>${x.v}</span><small>${optionMeta(x.v)}</small></div>`).join('');
-  p.classList.add('open');
-}
-function chooseOption(v){$('selector').value=v;hideOptionPanel();applySelection();}
-function handleSearchKey(e){
-  const p=$('optionsPanel');
-  if(e.key==='Enter'){e.preventDefault();const a=p?.querySelector('.option-row.active')||p?.querySelector('.option-row'); if(a)chooseOption(a.dataset.value); else applySelection();return;}
-  if(!p||!p.classList.contains('open'))return;
-  const rows=[...p.querySelectorAll('.option-row')]; if(!rows.length)return;
-  let i=rows.findIndex(r=>r.classList.contains('active'));
-  if(e.key==='ArrowDown'){e.preventDefault();rows[i]?.classList.remove('active');i=(i+1+rows.length)%rows.length;rows[i].classList.add('active');rows[i].scrollIntoView({block:'nearest'});}
-  if(e.key==='ArrowUp'){e.preventDefault();rows[i]?.classList.remove('active');i=(i-1+rows.length)%rows.length;rows[i].classList.add('active');rows[i].scrollIntoView({block:'nearest'});}
-  if(e.key==='Escape')hideOptionPanel();
-}
-document.addEventListener('click',e=>{if(!$('smartSearch')?.contains(e.target))hideOptionPanel();});
 
-function fillOptions(){
-  if(mode==='tienda')optionItems=directory.map(d=>`${d.ceco} · ${d.tienda}`).sort((a,b)=>a.localeCompare(b,'es'));
-  if(mode==='dm')optionItems=[...new Set(directory.map(x=>x.dm).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es'));
-  if(mode==='rd')optionItems=[...new Set(directory.map(x=>x.rd).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es'));
-  const dl=$('options'); if(dl)dl.innerHTML=optionItems.map(x=>`<option value="${x}"></option>`).join('');
-  if(!optionItems.includes($('selector').value))$('selector').value=optionItems[0]||'';
-  fillMonthFilter();
-  updateOptionPanel(false);
-}
-function applySelection(){current=resolveSelection(); hideOptionPanel(); if(current)render();}
-function setMode(m){
-  mode=m;
-  ['Tienda','DM','RD'].forEach(x=>$('tab'+x).classList.toggle('active',m===x.toLowerCase()));
-  $('selector').placeholder=m==='tienda'?'Busca por CeCo o nombre de tienda...':m==='dm'?'Busca por nombre de DM...':'Busca por nombre de RD...';
-  fillOptions(); applySelection();
-}
-
-function daysInMonthNum(m){return [31,28,31,30,31,30,31,31,30,31,30,31][m-1]||30;}
-function monthlySales(){return groupByMonth(D.venta,'venta_mes','sum');}
-function awsSeries(){return monthlySales().map((v,i)=>valid(v)?(v/daysInMonthNum(i+1))*7:null);}
-function awsYTD(){return avg(awsSeries());}
-function awsCard(){
-  const id='c'+Math.random().toString(36).slice(2);
-  const vals=awsSeries(), k=awsYTD();
-  const html=`<article class="card"><div class="card-head"><div><h3>AWS</h3><div class="note">Average Weekly Sales</div></div><div><div class="kpi">${fmt(k,'moneyK')}</div><div class="note">Promedio semanal YTD</div></div></div><div class="canvas-wrap"><canvas id="${id}"></canvas></div></article>`;
-  setTimeout(()=>makeChart(id,{type:'bar',data:{labels:monthShort,datasets:[{label:'AWS',data:vals,borderColor:'#00754a',backgroundColor:'rgba(0,117,74,.16)',borderWidth:2}]},options:chartOpt('moneyK')}),0);
-  return html;
-}
-
-function chartOptV6(type,hasDiff=false,diffType='pp'){
-  const base=chartOpt(type);
-  if(hasDiff){
-    base.scales.y1={position:'right',display:false,grid:{display:false},ticks:{callback:v=>yTick(v,diffType)}};
+  function seriesFromProfile(graph, cecos) {
+    let actualHeader=graph.actual, referenceHeader=graph.reference;
+    if (graph.id==='productividad' && state.productivity==='TPLH') { actualHeader='TPLH'; referenceHeader='TPLH AA'; }
+    const ai=metricIndex(actualHeader), ri=referenceHeader ? metricIndex(referenceHeader) : -1;
+    return state.data.months.map(month=>{
+      const rows=cecos.map(cc=>state.data.profile[cc]?.[String(month.id)]).filter(Boolean);
+      return {month,actual:avg(rows.map(row=>row[ai])),reference:ri>=0?avg(rows.map(row=>row[ri])):null};
+    });
   }
-  return base;
-}
-function chartCard(cfg){
-  const id='c'+Math.random().toString(36).slice(2);
-  const vals=groupByMonth(cfg.source,cfg.metric,cfg.agg||'avg',cfg.key||'ceco');
-  const type=cfg.type||(pctMetrics.has(cfg.metric)?'pct':'num');
-  const k=cfg.ytd===false?latest(vals):(cfg.ytdAgg==='avg'?avg(vals):ytd(vals,cfg.agg||'avg'));
-  let diffs=null,diffY=null;
-  if(cfg.diffMetric){const comp=groupByMonth(cfg.source,cfg.diffMetric,cfg.diffAgg||cfg.agg||'avg',cfg.key||'ceco');diffs=monthlyDiff(vals,comp,cfg.diffMode);diffY=avg(diffs);}
-  else if(cfg.diffSourceMetric){diffs=groupByMonth(cfg.diffSource||cfg.source,cfg.diffSourceMetric,cfg.diffAgg||'avg',cfg.diffKey||cfg.key||'ceco');diffY=avg(diffs);}
-  const diffType=cfg.diffType||type;
-  const chips=(diffs||[]).map((d,i)=>valid(d)?`<span class="pill ${cls(d,cfg.inverseDiff)}">${monthShort[i]} ${fmt(cfg.diffAbs?Math.abs(d):d,diffType)}${diffType==='pp'?' pp':''}</span>`:'').join('');
-  const html=`<article class="card"><div class="card-head"><div><h3>${cfg.title}</h3><div class="note">${cfg.subtitle||'Tendencia mensual + YTD'}</div></div><div><div class="kpi">${fmt(k,type)}</div><div class="note">${cfg.ytd===false?'Último dato':'YTD'}</div></div></div><div class="canvas-wrap"><canvas id="${id}"></canvas></div>${valid(diffY)?`<span class="pill ${cls(diffY,cfg.inverseDiff)}">Dif YTD ${fmt(cfg.diffAbs?Math.abs(diffY):diffY,diffType)}${diffType==='pp'?' pp':''}</span>`:''}${diffs?`<div class="pill-row">${chips}</div>`:''}</article>`;
-  setTimeout(()=>{const ds=[{label:cfg.title,data:vals,type:cfg.bar?'bar':'line',tension:.35,fill:false,borderWidth:3,pointRadius:3,borderColor:'#00754a',backgroundColor:'rgba(0,117,74,.16)',yAxisID:'y'}];if(diffs)ds.push({label:'Dif',data:diffs.map(x=>cfg.diffAbs&&valid(x)?Math.abs(x):x),type:'bar',borderWidth:0,backgroundColor:diffs.map(x=>cls(x,cfg.inverseDiff)==='pos'?'rgba(0,117,74,.14)':'rgba(194,65,12,.14)'),yAxisID:'y1'});makeChart(id,{type:cfg.bar?'bar':'line',data:{labels:monthShort,datasets:ds},options:chartOptV6(type,!!diffs,diffType)});},0);
-  return html;
-}
 
-function signedDuration(seconds){
-  if(!valid(seconds))return '—';
-  const sign=Number(seconds)<0?'-':'+'; const a=Math.abs(Math.round(Number(seconds)));
-  if(a<60)return `${sign}${a} seg`;
-  if(a<3600){const m=Math.floor(a/60),s=a%60;return `${sign}${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;}
-  const h=Math.floor(a/3600),m=Math.floor((a%3600)/60),s=a%60;return `${sign}${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
-}
-function dtYTD(){
-  const dt=groupByMonth(D.pcs,'DT Time').map(toSeconds), aa=groupByMonth(D.pcs,'Tiempo DT AA').map(toSeconds);
-  const yDt=avg(dt), yAa=avg(aa); return {dt,aa,yDt,yAa,delta:valid(yDt)&&valid(yAa)?yDt-yAa:null};
-}
-function dtCompareCard(){
-  const id='c'+Math.random().toString(36).slice(2);
-  const d=dtYTD();
-  const dif=d.dt.map((v,i)=>valid(v)&&valid(d.aa[i])?v-d.aa[i]:null);
-  const abs=dif.map(x=>valid(x)?Math.abs(x):null), state=dif.map(x=>valid(x)?x<=0:null);
-  const chips=dif.map((x,i)=>valid(x)?`<span class="pill ${state[i]?'pos':'neg'}">${monthShort[i]} ${signedDuration(x)}</span>`:'').join('');
-  const better=valid(d.delta)?d.delta<=0:null;
-  const html=`<article class="card"><div class="card-head"><div><h3>DT Time</h3><div class="note">DT vs AA · menor tiempo es verde</div></div><div><div class="kpi ${better?'':'neg-text'}">${sec(d.yDt)}</div><div class="note">Promedio YTD</div></div></div><div class="dt-summary"><span class="pill neutral">DT ${sec(d.yDt)}</span><span class="pill neutral">AA ${sec(d.yAa)}</span><span class="pill ${better?'pos':'neg'}">${better?'Mejora':'Oportunidad'} ${signedDuration(d.delta)}</span></div><div class="canvas-wrap"><canvas id="${id}"></canvas></div><div class="pill-row">${chips}</div></article>`;
-  setTimeout(()=>makeChart(id,{type:'line',data:{labels:monthShort,datasets:[{label:'DT Time',data:d.dt,tension:.35,borderWidth:3,borderColor:'#006241',pointRadius:3,yAxisID:'y'},{label:'DT AA',data:d.aa,tension:.35,borderWidth:2,borderColor:'#8B6F47',pointRadius:3,yAxisID:'y'},{label:'Dif abs',data:abs,type:'bar',backgroundColor:state.map(v=>v===null?'rgba(216,208,196,.20)':v?'rgba(0,117,74,.16)':'rgba(194,65,12,.16)'),borderWidth:0,yAxisID:'y1'}]},options:chartOptV6('sec',true,'sec')}),0);
-  return html;
-}
+  function seriesFromBusiness(graph, cecos) {
+    return state.data.months.map(month=>{
+      const rows=cecos.map(cc=>state.data.business[cc]?.[String(month.id)]).filter(Boolean);
+      const aggregate=graph.id==='sales'?sum:avg;
+      return {month,actual:aggregate(rows.map(row=>row[graph.actual])),reference:graph.reference?aggregate(rows.map(row=>row[graph.reference])):null};
+    });
+  }
 
-function insightDisplay(name,raw){
-  if(name==='DT')return signedDuration(raw);
-  return `${fmt(raw,'pp')} pp`;
-}
-function renderExecutive(){
-  const ctcSrc=closedSource(mode==='tienda'?D.ctc:D.ctc_dm);
-  const conn=metricValue(D.pcs,'Conexion'), beb=metricValue(D.pcs,'Calidad de la Bebida'), labor=metricValue(D.pcs,'Labor'), ebitda=metricValue(D.pcs,'EBITDA');
-  const aws=awsYTD();
-  const ctcVal=mode==='tienda'?metricValue(ctcSrc,'ctc'):metricValue(ctcSrc,'ctc','avg','dm');
-  const laborRaw=metricDiff(D.pcs,'Labor','Labor PPTO',true).raw, ebitdaRaw=metricDiff(D.pcs,'EBITDA','EBITDA PPTO').raw;
-  const kpis=[['Conexión',fmt(conn,'pct'),status('conexion',conn),'Experiencia'],['Bebida',fmt(beb,'pct'),status('bebida',beb),'Calidad'],['Labor',fmt(labor,'pct'),status('labor',labor,laborRaw),'Vs ppto'],['EBITDA',fmt(ebitda,'pct'),status('ebitda',ebitda,ebitdaRaw),'Vs ppto'],['AWS',fmt(aws,'moneyK'),'good','Venta semanal'],['CTC',fmt(ctcVal,'pct'),'good','Cada Taza Cuenta']];
-  const dt=dtYTD();
-  const items=[['Conexión',metricDiff(D.pcs,'Conexion','Conexion AA')],['Bebida',metricDiff(D.pcs,'Calidad de la Bebida','Calidad de Bebida AA')],['Food Attach',metricDiff(D.pcs,'Food Attach','Food Attach AA')],['SR',metricDiff(D.pcs,'SR','% SR AA')],['Labor',metricDiff(D.pcs,'Labor','Labor PPTO',true)],['Costo',metricDiff(D.pcs,'Costo %','Costo % PPTO',true)],['EBITDA',metricDiff(D.pcs,'EBITDA','EBITDA PPTO')]];
-  if(valid(dt.delta))items.push(['DT',{raw:dt.delta,score:-dt.delta/60}]);
-  const good=items.filter(x=>valid(x[1].score)&&x[1].score>0).sort((a,b)=>b[1].score-a[1].score).slice(0,3);
-  const risk=items.filter(x=>valid(x[1].score)&&x[1].score<0).sort((a,b)=>a[1].score-b[1].score).slice(0,3);
-  $('executivePanel').innerHTML=`<div class="exec-title"><div><h2>Resumen Ejecutivo</h2><p class="note">Lectura rápida para toma de decisiones</p></div><span class="pill neutral">${scopeCecos().length} tienda(s)</span></div><div class="exec-grid">${kpis.map(k=>`<div class="exec-kpi"><small>${k[0]}</small><b>${k[1]}</b><span class="status ${k[2]}">${k[3]}</span></div>`).join('')}</div><div class="insight-grid"><div class="insight-box"><h4>Fortalezas</h4><ul>${good.length?good.map(x=>`<li>${x[0]} · ${insightDisplay(x[0],x[1].raw)}</li>`).join(''):'<li>Sin variaciones positivas relevantes</li>'}</ul></div><div class="insight-box"><h4>Oportunidades</h4><ul>${risk.length?risk.map(x=>`<li>${x[0]} · ${insightDisplay(x[0],x[1].raw)}</li>`).join(''):'<li>Sin alertas críticas con datos disponibles</li>'}</ul></div></div>`;
-}
+  function selectedValue(series, key, graph) {
+    if (state.period !== 'YTD') return series.find(item=>String(item.month.id)===String(state.period))?.[key] ?? null;
+    if (graph.ytd === 'latest') {
+      const values=[...series].reverse().map(item=>item[key]); return values.find(valid) ?? null;
+    }
+    return graph.ytd === 'sum' ? sum(series.map(item=>item[key])) : avg(series.map(item=>item[key]));
+  }
 
-function renderSections(){
-  $('partnerGrid').innerHTML=chartCard({title:'Rolling RY',source:D.pcs,metric:'Rolling RY',ytd:false,diffMetric:'Rolling RY AA',diffMode:'aaMinus',diffType:'pp',subtitle:'12M atrás · objetivo <30%'})+chartCard({title:'IPLH',source:D.pcs,metric:'IPLH'})+chartCard({title:'TPLH',source:D.pcs,metric:'TPLH'})+chartCard({title:'Labor %',source:D.pcs,metric:'Labor',diffMetric:'Labor PPTO',diffType:'pp',inverseDiff:true,subtitle:'Menor a presupuesto es ahorro'})+chartCard({title:'ICA Score',source:D.pcs,metric:'ICA Score',type:'num',bar:true,subtitle:'Auditorías disponibles'});
-  $('customerGrid').innerHTML=chartCard({title:'Venta Mes',source:D.venta,metric:'venta_mes',type:'moneyM',agg:'sum',bar:true,subtitle:'Venta mensual'})+awsCard()+chartCard({title:'ADT',source:D.adt,metric:'adt',type:'num',diffSourceMetric:'adt_diff',diffType:'num',subtitle:'ADT real + dif vs AA'})+chartCard({title:'Ticket Promedio',source:D.ticket,metric:'ticket',type:'ticket',diffSourceMetric:'ticket_diff',diffSource:D.ticket,diffType:'pp',subtitle:'Ticket + dif vs AA'})+chartCard({title:'VMT',source:D.pcs,metric:'VMT%'})+chartCard({title:'OMT',source:D.pcs,metric:'OMT%'})+chartCard({title:'Conexión',source:D.pcs,metric:'Conexion',diffMetric:'Conexion AA',diffType:'pp'})+chartCard({title:'Calidad Bebida',source:D.pcs,metric:'Calidad de la Bebida',diffMetric:'Calidad de Bebida AA',diffType:'pp'})+chartCard({title:'Food Attach',source:D.pcs,metric:'Food Attach',diffMetric:'Food Attach AA',diffType:'pp'})+chartCard({title:'Segundas Ventas',source:D.pcs,metric:'Segundas Ventas',type:'num'})+chartCard({title:'SR',source:D.pcs,metric:'SR',diffMetric:'% SR AA',diffType:'pp'})+chartCard({title:'Cada Taza Cuenta',source:closedSource(mode==='tienda'?D.ctc:D.ctc_dm),metric:'ctc',type:'pct',key:mode==='tienda'?'ceco':'dm',subtitle:'Participación mensual'});
-  $('businessGrid').innerHTML=compareCard('Venta Delivery',D.pcs,'Venta Delivery','Delivery AA',{type:'pct',diffType:'pp'})+compareCard('Costo %',D.pcs,'Costo %','Costo % PPTO',{inverseDiff:true,type:'pct',diffType:'pp'})+compareCard('EBITDA',D.pcs,'EBITDA','EBITDA PPTO',{type:'pct',diffType:'pp'})+dtCompareCard();
-}
+  function deltaClass(delta, graph) {
+    if (!valid(delta)) return 'neutral';
+    const favorable=graph.direction==='lower' ? delta<=0 : delta>=0;
+    return favorable?'good':'bad';
+  }
 
-// reinicia con funciones 6.0
-fillOptions(); applySelection();
+  function niceBounds(values) {
+    const clean=values.filter(valid);
+    if (!clean.length) return null;
+    let min=Math.min(...clean), max=Math.max(...clean);
+    if (Math.abs(max-min)<1e-9) { const pad=Math.max(Math.abs(max)*.12,1); min-=pad; max+=pad; }
+    else { const pad=(max-min)*.16; min-=pad; max+=pad; }
+    return {min,max};
+  }
 
+  function chartSvg(series, graph) {
+    const bounds=niceBounds(series.flatMap(item=>[item.actual,item.reference]));
+    if (!bounds) return '<div class="empty-chart">Sin dato verificado para este alcance.</div>';
+    const width=540,height=190,left=52,right=16,top=14,bottom=30,plotW=width-left-right,plotH=height-top-bottom;
+    const x=index=>left+(series.length===1?plotW/2:index*plotW/(series.length-1));
+    const y=value=>top+(bounds.max-value)*plotH/(bounds.max-bounds.min);
+    const path=key=>{
+      let output='',drawing=false;
+      series.forEach((item,index)=>{const value=item[key];if(!valid(value)){drawing=false;return;}output+=`${drawing?' L':' M'} ${x(index).toFixed(1)} ${y(value).toFixed(1)}`;drawing=true;});return output;
+    };
+    const ticks=Array.from({length:4},(_,index)=>bounds.min+(bounds.max-bounds.min)*(3-index)/3);
+    const grid=ticks.map(value=>`<line class="grid" x1="${left}" y1="${y(value)}" x2="${width-right}" y2="${y(value)}"/><text x="${left-8}" y="${y(value)+3}" text-anchor="end">${escapeHtml(fmt(value,graph.format))}</text>`).join('');
+    const labels=series.map((item,index)=>`<text x="${x(index)}" y="${height-8}" text-anchor="middle">${escapeHtml(item.month.short)}</text>`).join('');
+    const actualPoints=series.map((item,index)=>valid(item.actual)?`<circle class="point-a" cx="${x(index)}" cy="${y(item.actual)}" r="3.5"><title>${escapeHtml(item.month.label)}: ${escapeHtml(fmt(item.actual,graph.format))}</title></circle>`:'').join('');
+    const referencePoints=series.map((item,index)=>valid(item.reference)?`<circle class="point-r" cx="${x(index)}" cy="${y(item.reference)}" r="3"><title>${escapeHtml(item.month.label)}: ${escapeHtml(fmt(item.reference,graph.format))}</title></circle>`:'').join('');
+    return `<svg class="chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="Tendencia de ${escapeHtml(graph.title)}">${grid}${labels}<path class="actual" d="${path('actual')}"/>${graph.reference?`<path class="reference" d="${path('reference')}"/>`:''}${actualPoints}${referencePoints}</svg>`;
+  }
 
-/* AWS FIX 6.3: AWS DM/RD = promedio simple de AWS de tiendas; Venta Mes conserva suma. */
+  function renderMetricCard(graph, source='profile') {
+    const cecos=scopeStores().map(item=>item.cc), series=source==='business'?seriesFromBusiness(graph,cecos):seriesFromProfile(graph,cecos);
+    const actual=selectedValue(series,'actual',graph), reference=selectedValue(series,'reference',graph);
+    const delta=valid(actual)&&valid(reference)?actual-reference:(graph.isDiffOnly?actual:null);
+    const refLabel=graph.referenceKind==='ppto'?'PPTO':'AA';
+    const title=graph.id==='productividad'?state.productivity:graph.title;
+    const control=graph.id==='productividad'?`<select class="card-control" data-productivity aria-label="Métrica de productividad"><option${state.productivity==='IPLH'?' selected':''}>IPLH</option><option${state.productivity==='TPLH'?' selected':''}>TPLH</option></select>`:'';
+    const subtitle=graph.subtitle||graph.note||`Real vs ${refLabel}`;
+    const verdict=deltaClass(delta,graph);
+    return `<article class="metric-card ${verdict}"><div class="metric-head"><div><h3>${escapeHtml(title)}</h3><p>${escapeHtml(subtitle)}</p></div>${control}</div><div class="metric-values"><div><small>Real</small><strong>${fmt(actual,graph.format)}</strong></div><div><small>${graph.reference?refLabel:'Referencia'}</small><strong>${graph.reference?fmt(reference,graph.format):'—'}</strong></div><div class="delta ${verdict}"><small>Diferencia</small><strong>${fmt(delta,graph.format,true)}</strong></div></div>${chartSvg(series,{...graph,title})}<div class="legend"><span><i class="legend-a"></i>Real</span>${graph.reference?`<span><i class="legend-r"></i>${refLabel}</span>`:''}</div></article>`;
+  }
+
+  function operationalSnapshot() {
+    const cecos=scopeStores().map(item=>item.cc);
+    const entries=state.data.graphs.filter(graph=>graph.pillar===state.pillar).map(graph=>({graph,series:seriesFromProfile(graph,cecos)}));
+    if (state.pillar==='Negocio') BUSINESS_GRAPHS.filter(graph=>graph.reference||graph.isDiffOnly).forEach(graph=>entries.push({graph,series:seriesFromBusiness(graph,cecos)}));
+    const scored=entries.map(({graph,series})=>{
+      const actual=selectedValue(series,'actual',graph), reference=selectedValue(series,'reference',graph);
+      const delta=valid(actual)&&valid(reference)?actual-reference:(graph.isDiffOnly?actual:null);
+      const favorable=valid(delta)?(graph.direction==='lower'?delta<=0:delta>=0):null;
+      return {title:graph.title,format:graph.format,delta,favorable};
+    }).filter(item=>item.favorable!==null);
+    return {scored,favorable:scored.filter(item=>item.favorable).length};
+  }
+
+  function opsCallout(label,item,tone) {
+    return `<div class="ops-callout ${tone}"><small>${label}</small><strong>${item?escapeHtml(item.title):'—'}</strong><span>${item?fmt(item.delta,item.format,true):'Sin dato comparable'}</span></div>`;
+  }
+
+  function renderOperational() {
+    const result=operationalSnapshot(), total=result.scored.length;
+    const strength=result.scored.filter(item=>item.favorable).sort((a,b)=>Math.abs(b.delta)-Math.abs(a.delta))[0];
+    const opportunity=result.scored.filter(item=>!item.favorable).sort((a,b)=>Math.abs(b.delta)-Math.abs(a.delta))[0];
+    const stores=scopeStores(), coverage=stores.length?Math.round(stores.filter(item=>state.data.profile[item.cc]||state.data.business[item.cc]).length*100/stores.length):0;
+    const score=total?Math.round(result.favorable*100/total):0;
+    $('operationalStrip').innerHTML=`<div class="ops-title"><span class="eyebrow">LECTURA OPERATIVA</span><h2>${total?`${result.favorable} de ${total} indicadores favorables`:'Sin comparativos disponibles'}</h2><p>Prioriza la oportunidad y después revisa la tendencia mensual.</p></div><div class="ops-score"><div class="score-ring" style="--score:${score}"><strong>${score}%</strong><span>favorable</span></div></div>${opsCallout('Fortaleza',strength,'good')}${opsCallout('Oportunidad',opportunity,'bad')}<div class="ops-callout neutral"><small>Cobertura</small><strong>${coverage}%</strong><span>${stores.length} tienda(s) en alcance</span></div>`;
+  }
+
+  function renderHero() {
+    const stores=scopeStores(), first=stores[0]||{}, cecos=stores.map(item=>item.cc);
+    const partner=aggregatePartners(cecos), businessSeries=seriesFromBusiness(BUSINESS_GRAPHS[0],cecos), sales=selectedValue(businessSeries,'actual',BUSINESS_GRAPHS[0]);
+    const profileCount=cecos.filter(cc=>state.data.profile[cc]).length, businessCount=cecos.filter(cc=>state.data.business[cc]).length;
+    const title=state.scope==='store'?`${first.cc} · ${first.store}`:state.selection;
+    const sub=state.scope==='store'?`${first.dm||'DM sin dato'} · ${first.region||'Región sin dato'}`:`${stores.length} tiendas · ${[...new Set(stores.map(item=>item.region).filter(Boolean))].length} región(es)`;
+    const details=state.scope==='store'?`${first.city||'Ciudad sin dato'} · Apertura ${formatDate(first.opened)}`:`Cobertura consolidada del alcance seleccionado`;
+    $('profileHero').classList.remove('skeleton');
+    $('profileHero').innerHTML=`<div class="profile-identity"><span class="eyebrow">${state.scope==='store'?'PERFIL DE TIENDA':state.scope==='dm'?'PERFIL DISTRITAL':'PERFIL REGIONAL'}</span><h1>${escapeHtml(title)}</h1><p>${escapeHtml(sub)}</p><p>${escapeHtml(details)}</p></div>${heroStat('Tiendas',stores.length,'Directorio verificado')}${heroStat('Partners',partner.headcount,'Activos resumidos')}${heroStat('Venta',fmt(sales,'currency'),state.period==='YTD'?'Acumulado YTD':'Periodo seleccionado')}${heroStat('Perfil',`${profileCount}/${stores.length}`,'Tiendas con Excel base')}${heroStat('Negocio',`${businessCount}/${stores.length}`,'Tiendas con CSV negocio')}`;
+  }
+  const heroStat=(label,value,note)=>`<div class="hero-stat"><small>${escapeHtml(label)}</small><strong>${escapeHtml(value)}</strong><span>${escapeHtml(note)}</span></div>`;
+
+  function aggregatePartners(cecos) {
+    const rows=cecos.map(cc=>state.data.partners[cc]).filter(Boolean), total=key=>sum(rows.map(row=>row[key]))||0;
+    const weighted=(key,weight='headcount')=>{const denom=sum(rows.map(row=>valid(row[key])?row[weight]:null));return denom?sum(rows.map(row=>valid(row[key])?row[key]*row[weight]:null))/denom:null;};
+    const roles={}; rows.forEach(row=>Object.entries(row.roles||{}).forEach(([key,value])=>roles[key]=(roles[key]||0)+value));
+    return {headcount:total('headcount'),baristas:total('baristas'),supervisors:total('supervisors'),managers:total('managers'),female:total('female'),male:total('male'),avgAge:weighted('avgAge'),avgTenureMonths:weighted('avgTenureMonths'),birthdaysThisMonth:total('birthdaysThisMonth'),anniversariesThisMonth:total('anniversariesThisMonth'),roles};
+  }
+
+  function renderPartnerPanel() {
+    const result=aggregatePartners(scopeStores().map(item=>item.cc));
+    const roles=Object.entries(result.roles).sort((a,b)=>b[1]-a[1]).slice(0,7);
+    $('partnerPanel').innerHTML=`<div class="panel-head"><div><span class="eyebrow">QUERY PARTNER</span><h2>Equipo resumido</h2></div><span class="source-status ready"><i></i>${result.headcount} activos</span></div><div class="partner-kpis">${miniKpi('Baristas',result.baristas)}${miniKpi('Supervisores',result.supervisors)}${miniKpi('Edad media',fmt(result.avgAge,'decimal'))}${miniKpi('Antigüedad',valid(result.avgTenureMonths)?`${(result.avgTenureMonths/12).toFixed(1)} años`:'—')}${miniKpi('Cumpleaños mes',result.birthdaysThisMonth)}${miniKpi('Aniversarios mes',result.anniversariesThisMonth)}${miniKpi('Mujeres',result.female)}${miniKpi('Hombres',result.male)}</div><div class="role-list">${roles.length?roles.map(([key,value])=>`<span>${escapeHtml(key)} · ${value}</span>`).join(''):'<span>Sin datos coincidentes</span>'}</div>`;
+  }
+  const miniKpi=(label,value)=>`<div><small>${escapeHtml(label)}</small><strong>${escapeHtml(value)}</strong></div>`;
+
+  function aggregateMix(cecos) {
+    const category={},order={}; let total=0;
+    const months=state.period==='YTD'?state.data.months.map(item=>String(item.id)):[String(state.period)];
+    cecos.forEach(cc=>months.forEach(month=>{const row=state.data.mix[cc]?.[month];if(!row||!valid(row.total))return;total+=row.total;Object.entries(row.category||{}).forEach(([key,value])=>category[key]=(category[key]||0)+value*row.total);Object.entries(row.order||{}).forEach(([key,value])=>order[key]=(order[key]||0)+value*row.total);}));
+    if (total) { Object.keys(category).forEach(key=>category[key]/=total); Object.keys(order).forEach(key=>order[key]/=total); }
+    return {category,order,total};
+  }
+  function mixRows(values) { const entries=Object.entries(values).sort((a,b)=>b[1]-a[1]).slice(0,6); return entries.length?entries.map(([key,value])=>`<div class="mix-row"><span title="${escapeHtml(key)}">${escapeHtml(key)}</span><div class="mix-bar"><i style="width:${Math.min(100,value*100)}%"></i></div><b>${fmt(value,'percent')}</b></div>`).join(''):'<div class="empty-chart">Sin cruce exacto de Mix.</div>'; }
+  function renderMixPanel() { const mix=aggregateMix(scopeStores().map(item=>item.cc)); $('mixPanel').innerHTML=`<div class="panel-head"><div><span class="eyebrow">BASE MIX</span><h2>Mix de venta</h2></div><span class="source-status ${mix.total?'ready':''}"><i></i>${mix.total?'Cruce verificado':'Sin coincidencia'}</span></div><div class="mix-layout"><div class="mix-block"><h3>Producto</h3>${mixRows(mix.category)}</div><div class="mix-block"><h3>Tipo de orden</h3>${mixRows(mix.order)}</div></div>`; }
+
+  function renderMetrics() {
+    let graphs=state.data.graphs.filter(graph=>graph.pillar===state.pillar);
+    let html=graphs.map(graph=>renderMetricCard(graph,'profile')).join('');
+    if (state.pillar==='Negocio') html+=BUSINESS_GRAPHS.map(graph=>renderMetricCard(graph,'business')).join('');
+    $('metricGrid').innerHTML=html || '<div class="error-panel"><h2>Sin métricas clasificadas</h2><p>Revisa la pestaña Instrucciones_Ejemplo.</p></div>';
+    document.querySelector('[data-productivity]')?.addEventListener('change',event=>{state.productivity=event.target.value;renderMetrics();});
+  }
+
+  function renderAll() {
+    renderHero(); renderOperational(); renderMetrics(); renderPartnerPanel(); renderMixPanel();
+    const number={Partner:'01',Cliente:'02',Negocio:'03'}[state.pillar];
+    $('pillarEyebrow').textContent=`PILAR ${number}`; $('pillarTitle').textContent=state.pillar; $('pillarDescription').textContent=descriptions[state.pillar];
+    document.querySelectorAll('[data-pillar]').forEach(button=>button.classList.toggle('active',button.dataset.pillar===state.pillar));
+  }
+
+  function showAudit() {
+    const audit=state.audit;
+    $('dialogTitle').textContent='Calidad de los motores';
+    $('dialogContent').innerHTML=`<div class="dialog-body"><div class="audit-grid">${auditKpi('Errores',audit.issueCount)}${auditKpi('Advertencias',audit.warningCount)}${auditKpi('Tiendas',audit.directory.validStores)}${auditKpi('Meses',state.data.months.length)}${auditKpi('Perfil',audit.profile.matchedStores)}${auditKpi('Negocio',audit.business.matchedStores)}${auditKpi('Mix',audit.mix.matchedStores)}${auditKpi('Partner',audit.partners.matchedStores)}</div><ul class="warning-list">${audit.warnings.map(item=>`<li>${escapeHtml(item)}</li>`).join('')}</ul></div>`;
+    $('detailsDialog').showModal();
+  }
+  const auditKpi=(label,value)=>`<div><small>${escapeHtml(label)}</small><strong>${escapeHtml(value)}</strong></div>`;
+  function showInstructions() {
+    $('dialogTitle').textContent='Instrucciones del motor';
+    $('dialogContent').innerHTML=`<div class="dialog-body"><ul class="instruction-list">${state.data.instructions.map(item=>`<li><strong>${escapeHtml(item.pillar)} · ${escapeHtml(item.graph||item.header)}</strong><span>${escapeHtml(item.instruction||'Sin instrucción adicional')}${item.note?` — ${escapeHtml(item.note)}`:''}</span></li>`).join('')}</ul></div>`;
+    $('detailsDialog').showModal();
+  }
+
+  function bindEvents() {
+    document.querySelectorAll('[data-scope]').forEach(button=>button.addEventListener('click',()=>{state.scope=button.dataset.scope;document.querySelectorAll('[data-scope]').forEach(item=>item.classList.toggle('active',item===button));fillOptions();renderAll();}));
+    document.querySelectorAll('[data-pillar]').forEach(button=>button.addEventListener('click',()=>{state.pillar=button.dataset.pillar;renderAll();}));
+    $('profileSearch').addEventListener('change',()=>{if(resolveSearch())renderAll();});
+    $('profileSearch').addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();if(resolveSearch())renderAll();}});
+    $('periodSelect').addEventListener('change',event=>{state.period=event.target.value;renderAll();});
+    $('printButton').addEventListener('click',()=>window.print()); $('qualityButton').addEventListener('click',showAudit); $('instructionsButton').addEventListener('click',showInstructions);
+    $('dialogClose').addEventListener('click',()=>$('detailsDialog').close());
+  }
+
+  async function start() {
+    try {
+      const [dataResponse,auditResponse]=await Promise.all([fetch('data/dashboard.json',{cache:'no-store'}),fetch('data/audit.json',{cache:'no-store'})]);
+      if (!dataResponse.ok || !auditResponse.ok) throw new Error(`No fue posible cargar los motores (${dataResponse.status}/${auditResponse.status}).`);
+      state.data=await dataResponse.json(); state.audit=await auditResponse.json();
+      if (state.data.schemaVersion!==2 || state.audit.issueCount) throw new Error('El contrato de datos no superó la auditoría.');
+      state.data.directory.sort((a,b)=>a.cc.localeCompare(b.cc));
+      fillOptions(state.data.profile['38101']?'38101':'');
+      $('periodSelect').innerHTML='<option value="YTD">YTD</option>'+state.data.months.map(month=>`<option value="${month.id}">${month.period} · ${escapeHtml(month.label)}</option>`).join('');
+      $('sourceStatus').classList.add('ready'); $('sourceStatus').querySelector('span').textContent=`${state.data.months.length} meses · ${state.audit.warningCount} advertencias controladas`;
+      bindEvents(); renderAll();
+      if ('serviceWorker' in navigator && location.protocol!=='file:') navigator.serviceWorker.register('sw.js').catch(()=>{});
+    } catch (error) {
+      console.error(error); $('sourceStatus').querySelector('span').textContent='Error de carga';
+      $('profileHero').classList.remove('skeleton'); $('profileHero').innerHTML=`<div class="error-panel"><h2>No se pudo abrir el perfil</h2><p>${escapeHtml(error instanceof Error?error.message:'Error inesperado')}</p></div>`;
+    }
+  }
+  start();
+})();

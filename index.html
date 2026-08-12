@@ -1,113 +1,84 @@
-<!DOCTYPE html>
-<html lang="es">
+<!doctype html>
+<html lang="es-MX">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Perfil RD · DM · Tienda 6.0</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#006241" />
-  <link rel="manifest" href="manifest.json" />
-  <link rel="icon" href="icon.svg" type="image/svg+xml" />
-  <link rel="apple-touch-icon" href="apple-touch-icon.png" />
-  <link rel="stylesheet" href="style.css" />
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <meta name="description" content="Perfil de tienda con comparativos mensuales, mix de venta y resumen de partners." />
+  <title>Perfil de Tienda</title>
+  <link rel="icon" href="assets/icon.svg" type="image/svg+xml" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="operational.css" />
 </head>
 <body>
-  <header class="hero">
-    <div>
-      <div class="eyebrow">STARBUCKS · PERFIL VISITA 6.0 · #GreenApronService</div>
-      <h1>Perfil RD · DM · Tienda</h1>
-      <p id="periodo">Enero a Mayo · YTD</p>
-    </div>
-    <div class="hero-actions">
-      <button class="btn white" onclick="exportPDF()">Exportar PDF</button>
-      <button class="btn ghost" onclick="resetPhoto()">Limpiar foto</button>
+  <header class="topbar">
+    <a class="brand" href="./" aria-label="Inicio Perfil de Tienda">
+      <img src="assets/icon.svg" alt="" width="42" height="42" />
+      <span><small>STARBUCKS MÉXICO</small><strong>Perfil de Tienda</strong></span>
+    </a>
+    <div class="top-actions">
+      <button class="button button-secondary" id="qualityButton" type="button">Calidad de datos</button>
+      <button class="button button-primary" id="printButton" type="button">Exportar perfil</button>
     </div>
   </header>
 
-  <main class="shell">
-    <section class="toolbar">
-      <div class="tabs" aria-label="Nivel de perfil">
-        <button id="tabTienda" class="active" onclick="setMode('tienda')">Tienda</button>
-        <button id="tabDM" onclick="setMode('dm')">DM</button>
-        <button id="tabRD" onclick="setMode('rd')">RD</button>
+  <main class="page-shell">
+    <section class="control-panel" aria-label="Filtros del perfil">
+      <div class="scope-tabs" role="group" aria-label="Nivel de análisis">
+        <button type="button" data-scope="store" class="active">Tienda</button>
+        <button type="button" data-scope="dm">DM</button>
+        <button type="button" data-scope="region">Región</button>
       </div>
-      <div class="searchbox">
-        <div class="smart-search" id="smartSearch">
-          <input id="selector" autocomplete="off" placeholder="Buscar tienda por CeCo o nombre..." oninput="updateOptionPanel()" onfocus="showOptionPanel()" onkeydown="handleSearchKey(event)" />
-          <button class="search-toggle" type="button" aria-label="Mostrar lista" onclick="toggleOptionPanel()">⌄</button>
-          <div id="optionsPanel" class="options-panel" role="listbox"></div>
-          <datalist id="options"></datalist>
-        </div>
-        <button class="btn green" onclick="applySelection()">Ver perfil</button>
-      </div>
+      <label class="field field-search">
+        <span>Perfil</span>
+        <input id="profileSearch" list="profileOptions" autocomplete="off" placeholder="Busca por CeCo o tienda" />
+        <datalist id="profileOptions"></datalist>
+      </label>
+      <label class="field">
+        <span>Periodo</span>
+        <select id="periodSelect"><option value="YTD">YTD</option></select>
+      </label>
+      <div class="source-status" id="sourceStatus" aria-live="polite"><i></i><span>Cargando motores…</span></div>
     </section>
 
-    <section class="layout">
-      <aside class="side-panel">
-        <article class="identity-card">
-          <label class="photo-box">
-            <input type="file" accept="image/*" onchange="loadPhoto(event)" />
-            <img id="photoPreview" alt="" />
-            <span id="photoLabel">Colocar foto gerente</span>
-          </label>
-          <div class="identity-text">
-            <h2 id="profileName">Selecciona una tienda</h2>
-            <p id="profileSub">Perfil ejecutivo YTD</p>
-          </div>
-        </article>
+    <section class="profile-hero skeleton" id="profileHero" aria-live="polite"></section>
 
-        <div id="baseGrid" class="base-grid"></div>
-        <article id="staffCard" class="staff-card">
-          <div class="staff-title">Plantilla</div>
-          <div class="staff-inputs">
-            <label>ASM<input id="staffASM" type="number" min="0" value="1" onchange="saveStaff()"></label>
-            <label>SS<input id="staffSS" type="number" min="0" value="1" onchange="saveStaff()"></label>
-            <label>BB<input id="staffBB" type="number" min="0" value="3" onchange="saveStaff()"></label>
-          </div>
-        </article>
+    <section class="operational-strip" id="operationalStrip" aria-label="Resumen operativo"></section>
 
-        <article id="typeVisualCard" class="mix-card hidden">
-          <div class="mix-head"><div><h3>Tipo tienda 5</h3><p>Distribución del portafolio</p></div></div>
-          <div id="typeBars" class="type-bars"></div>
-        </article>
+    <nav class="pillar-tabs" aria-label="Pilares">
+      <button type="button" data-pillar="Partner" class="active"><span>01</span>Partner</button>
+      <button type="button" data-pillar="Cliente"><span>02</span>Cliente</button>
+      <button type="button" data-pillar="Negocio"><span>03</span>Negocio</button>
+    </nav>
 
-        <article class="mix-card">
-          <div class="mix-head">
-            <div><h3>Mix Tipo de Orden</h3><p>Participación por canal</p></div>
-            <select id="mixMonth" onchange="renderMixOnly()"></select>
-          </div>
-          <div id="orderIconCards" class="icon-cards"></div>
-          <div class="mini-canvas"><canvas id="chartOrder"></canvas></div>
-        </article>
+    <section class="section-heading">
+      <div><span class="eyebrow" id="pillarEyebrow">PILAR 01</span><h2 id="pillarTitle">Partner</h2></div>
+      <p id="pillarDescription">Personas, productividad y eficiencia de la tienda.</p>
+    </section>
+    <section class="metric-grid" id="metricGrid"></section>
 
-        <article class="mix-card">
-          <div class="mix-head"><div><h3>Mix Producto</h3><p>Participación por familia</p></div></div>
-          <div id="categoryIconCards" class="icon-cards"></div>
-          <div class="mini-canvas"><canvas id="chartCategory"></canvas></div>
-        </article>
-      </aside>
+    <section class="insight-grid">
+      <article class="panel" id="partnerPanel"></article>
+      <article class="panel" id="mixPanel"></article>
+    </section>
 
-      <section class="content">
-        <section id="executivePanel" class="executive-panel"></section>
-
-        <section class="section-head"><div><h2>Partner</h2><p>Rolling · Productividad · Labor · ICA</p></div></section>
-        <div id="partnerGrid" class="card-grid"></div>
-
-        <section class="section-head"><div><h2>Cliente</h2><p>Venta · AWS · ADT · Ticket · Experiencia · CTC</p></div></section>
-        <div id="customerGrid" class="card-grid"></div>
-
-        <section class="section-head"><div><h2>Negocio</h2><p>Delivery · Costo · EBITDA · Drive Thru</p></div></section>
-        <div id="businessGrid" class="card-grid"></div>
-      </section>
+    <section class="panel instructions-panel">
+      <div class="panel-head"><div><span class="eyebrow">TRAZABILIDAD</span><h2>Cómo leer este perfil</h2></div><button type="button" class="text-button" id="instructionsButton">Ver instrucciones completas</button></div>
+      <div class="reading-grid">
+        <div><i class="signal good"></i><strong>Verde</strong><p>Real supera AA/PPTO. En Labor, Costo y DT, menor es mejor.</p></div>
+        <div><i class="signal bad"></i><strong>Rojo</strong><p>La variación está por debajo de la referencia aplicable.</p></div>
+        <div><i class="signal neutral"></i><strong>Sin dato</strong><p>No hubo coincidencia verificable o el valor fue −100% comparativo.</p></div>
+      </div>
     </section>
   </main>
 
-  <footer>
-    Directorio como nombre oficial · Store_Master para homologación · PCS / Venta / ADT / Ticket / Mix / Cada Taza Cuenta.
-  </footer>
+  <dialog id="detailsDialog">
+    <div class="dialog-head"><div><span class="eyebrow">AUDITORÍA</span><h2 id="dialogTitle">Detalle</h2></div><button type="button" class="icon-button" id="dialogClose" aria-label="Cerrar">×</button></div>
+    <div id="dialogContent"></div>
+  </dialog>
 
-  <script src="data.js"></script>
-  <script src="app.js"></script>
-  <script>if('serviceWorker' in navigator){navigator.serviceWorker.register('./sw.js').catch(()=>{});}</script>
+  <noscript>Este dashboard requiere JavaScript para procesar los motores.</noscript>
+  <script src="app.js" defer></script>
 </body>
 </html>

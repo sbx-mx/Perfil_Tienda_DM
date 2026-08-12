@@ -1,5 +1,12 @@
-const CACHE='perfil-rd-dm-tienda-v6';
-const ASSETS=['./','./index.html','./style.css','./app.js','./data.js','./manifest.json','./icon.svg','./icon-192.png','./icon-512.png','./apple-touch-icon.png','./Store_Master_Audit.csv'];
-self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS)).then(()=>self.skipWaiting())));
-self.addEventListener('activate',e=>e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));
-self.addEventListener('fetch',e=>e.respondWith(fetch(e.request).then(r=>{const copy=r.clone();caches.open(CACHE).then(c=>c.put(e.request,copy)).catch(()=>{});return r;}).catch(()=>caches.match(e.request).then(r=>r||caches.match('./index.html')))));
+const CACHE = 'perfil-tienda-v9';
+const CORE = ['./','index.html','styles.css','operational.css','app.js','manifest.webmanifest','assets/icon.svg'];
+self.addEventListener('install', event => event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(CORE))));
+self.addEventListener('activate', event => event.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(key => key !== CACHE).map(key => caches.delete(key))))));
+self.addEventListener('fetch', event => {
+  const url = new URL(event.request.url);
+  if (url.pathname.endsWith('/data/dashboard.json') || url.pathname.endsWith('/data/audit.json')) {
+    event.respondWith(fetch(event.request, {cache:'no-store'}).then(response => { const copy=response.clone(); caches.open(CACHE).then(cache=>cache.put(event.request,copy)); return response; }).catch(()=>caches.match(event.request)));
+    return;
+  }
+  event.respondWith(caches.match(event.request).then(cached => cached || fetch(event.request)));
+});

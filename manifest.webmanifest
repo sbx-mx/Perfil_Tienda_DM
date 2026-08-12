@@ -1,0 +1,16 @@
+{
+  "id": "./",
+  "name": "Perfil de Tienda",
+  "short_name": "Perfil Tienda",
+  "description": "Dashboard ejecutivo de perfil de tienda",
+  "lang": "es-MX",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "theme_color": "#006241",
+  "background_color": "#f4f1ea",
+  "icons": [
+    {"src":"assets/icon-192.png","sizes":"192x192","type":"image/png"},
+    {"src":"assets/icon-512.png","sizes":"512x512","type":"image/png"}
+  ]
+}
