@@ -24,6 +24,12 @@ jobs:
       - name: Auditar alcance
         run: python scripts/cleanup_obsolete.py
 
+      - name: Validar que el sitio no use archivos legados
+        run: |
+          ! grep -R --line-number --fixed-strings 'data.js' index.html app.js sw.js manifest.webmanifest
+          ! grep -R --line-number --fixed-strings 'style.css' index.html app.js sw.js manifest.webmanifest
+          ! grep -R --line-number --fixed-strings 'Store_Master_Audit.csv' index.html app.js sw.js manifest.webmanifest
+
       - name: Eliminar sólo rutas autorizadas
         if: ${{ inputs.confirm_delete == 'ELIMINAR' }}
         run: python scripts/cleanup_obsolete.py --apply --check-clean
@@ -35,9 +41,11 @@ jobs:
             echo "No hay archivos legados presentes"
             exit 0
           fi
-          python scripts/cleanup_obsolete.py --print-candidates > .cleanup-candidates.txt
-          mapfile -t obsolete < .cleanup-candidates.txt
-          rm .cleanup-candidates.txt
+          mapfile -t obsolete < <(git diff --name-only --diff-filter=D)
+          if [ "${#obsolete[@]}" -eq 0 ]; then
+            echo "No hay eliminaciones que registrar"
+            exit 0
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -u -- "${obsolete[@]}"
