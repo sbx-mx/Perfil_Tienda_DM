@@ -1,6 +1,20 @@
 name: Eliminar archivos legados autorizados
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/cleanup-obsolete.yml"
+      - "data.js"
+      - "Store_Master_Audit.csv"
+      - "README.txt"
+      - "manifest.json"
+      - "apple-touch-icon.png"
+      - "icon-192.png"
+      - "icon-512.png"
+      - "icon.svg"
+      - "style.css"
+      - "data/engines/Base_Mix.csv"
   workflow_dispatch:
 
 concurrency:
@@ -33,6 +47,15 @@ jobs:
 
       - name: Eliminar sólo rutas autorizadas
         run: python scripts/cleanup_obsolete.py --apply --check-clean
+
+      - name: Confirmar raíz limpia
+        run: |
+          while IFS= read -r obsolete; do
+            test ! -e "$obsolete" || {
+              echo "Persistió archivo obsoleto: $obsolete"
+              exit 1
+            }
+          done < <(python scripts/cleanup_obsolete.py --print-candidates)
 
       - name: Registrar limpieza
         run: |
