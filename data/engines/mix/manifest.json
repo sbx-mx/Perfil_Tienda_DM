@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "source": "Base_Mix.csv",
+  "sourceBytes": 54637554,
+  "sourceSha256": "bb5ce83648df0dd4b4f82fd6eb56ae3dbd565ff80e987ba0c38a0e62de2c796a",
+  "rows": 714212,
+  "invalidRows": 0,
+  "parts": [
+    {
+      "file": "Base_Mix_01.csv",
+      "month": 1,
+      "rows": 235879,
+      "bytes": 17798729,
+      "sha256": "3bc3d6caceeab41fd1c132aeb2ecce795d4b82d8c787ea3fa19c5848f7ac31a3"
+    },
+    {
+      "file": "Base_Mix_02.csv",
+      "month": 2,
+      "rows": 238069,
+      "bytes": 17966612,
+      "sha256": "b1c5af09c16fe5925239e4e18058395ba96489eb73c35709cf1f50e3895e0e55"
+    },
+    {
+      "file": "Base_Mix_04.csv",
+      "month": 4,
+      "rows": 240264,
+      "bytes": 18158077,
+      "sha256": "e3984c68f2e0bfb96e44312390547b919ce0ea12e868ca503681b204ea84630f"
+    }
+  ]
+}
