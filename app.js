@@ -2,17 +2,17 @@
   'use strict';
 
   const $ = id => document.getElementById(id);
-  const state = { data:null, audit:null, scope:'store', selection:'', period:'YTD', pillar:'Partner', productivity:'IPLH' };
+  const state = { data:null, audit:null, scope:'store', selection:'', period:'YTD', mixMonth:'YTD', pillar:'Partner', productivity:'IPLH', chartMode:'trend' };
   const descriptions = {
     Partner:'Personas, productividad y eficiencia de la tienda.',
     Cliente:'Experiencia, conexión y comportamiento contra año anterior.',
     Negocio:'Venta, presupuesto, tráfico, rentabilidad y tiempos operativos.',
   };
   const BUSINESS_GRAPHS = [
-    {id:'sales',pillar:'Negocio',title:'Venta',actual:'sales',reference:'salesBudget',referenceKind:'ppto',format:'currency',direction:'higher',ytd:'sum',subtitle:'Venta real vs presupuesto calculado desde la variación fuente'},
+    {id:'sales',pillar:'Negocio',title:'Venta ejecutiva',actual:'sales',reference:'salesBudget',referenceKind:'ppto',format:'millions',direction:'higher',ytd:'sum',subtitle:'Venta mensual expresada en millones de pesos'},
     {id:'adt',pillar:'Negocio',title:'ADT',actual:'adt',reference:'adtAa',referenceKind:'aa',format:'number',direction:'higher',ytd:'average',subtitle:'Transacciones reales vs año anterior'},
     {id:'aws',pillar:'Negocio',title:'AWS',actual:'aws',reference:null,referenceKind:'aa',format:'currency',direction:'higher',ytd:'average',subtitle:'Average Weekly Sales informado por el motor'},
-    {id:'ticket',pillar:'Negocio',title:'Ticket promedio',actual:'ticket',reference:'ticketAa',referenceKind:'aa',format:'currency1',direction:'higher',ytd:'average',subtitle:'Ticket real vs año anterior'},
+    {id:'ticket',pillar:'Negocio',title:'Ticket promedio',actual:'ticket',reference:'ticketAa',secondaryReference:'ticketBudget',referenceKind:'aa',format:'currency1',direction:'higher',ytd:'average',subtitle:'Lectura mensual Real · AA · PPTO'},
     {id:'omt-diff',pillar:'Negocio',title:'OMT vs AA',actual:'omtDiff',reference:null,referenceKind:'aa',format:'number',direction:'higher',ytd:'average',isDiffOnly:true,subtitle:'Diferencia informada por el motor; no se inventa referencia'},
   ];
 
@@ -27,6 +27,7 @@
     const sign = signed && value > 0 ? '+' : '';
     if (type === 'percent') return `${sign}${(value*100).toFixed(1)}%`;
     if (type === 'currency') return `${sign}${new Intl.NumberFormat('es-MX',{style:'currency',currency:'MXN',maximumFractionDigits:0}).format(value)}`;
+    if (type === 'millions') return `${sign}$${(value/1000000).toFixed(1)} M`;
     if (type === 'currency1') return `${sign}${new Intl.NumberFormat('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:1,maximumFractionDigits:1}).format(value)}`;
     if (type === 'decimal') return `${sign}${value.toFixed(1)}`;
     if (type === 'duration') {
@@ -53,11 +54,19 @@
 
   function fillOptions(preferred='') {
     const options=scopeOptions();
-    $('profileOptions').innerHTML=options.map(item=>`<option value="${escapeHtml(item.label)}"></option>`).join('');
     let option=options.find(item=>item.value===preferred) || options.find(item=>item.value===state.selection) || options[0];
     if (!option) return;
     state.selection=option.value; $('profileSearch').value=option.label;
     $('profileSearch').placeholder=state.scope==='store'?'Busca por CeCo o tienda':state.scope==='dm'?'Busca un DM':'Busca una región';
+    $('profileLabel').textContent=state.scope==='store'?'Tienda':state.scope==='dm'?'District Manager':'Región';
+    renderPickerOptions('');
+  }
+
+  function renderPickerOptions(query='') {
+    const normalized=normalize(query), options=scopeOptions().filter(item=>!normalized||normalize(item.search).includes(normalized)).slice(0,120);
+    const dropdown=$('profileOptions');
+    dropdown.innerHTML=options.length?options.map(item=>`<button type="button" role="option" data-profile-value="${escapeHtml(item.value)}" class="${item.value===state.selection?'selected':''}"><strong>${escapeHtml(item.label)}</strong>${state.scope==='store'?`<small>${escapeHtml(item.search.replace(item.value,'').trim())}</small>`:''}</button>`).join(''):'<p>Sin coincidencias</p>';
+    dropdown.querySelectorAll('[data-profile-value]').forEach(button=>button.addEventListener('mousedown',event=>{event.preventDefault();const option=scopeOptions().find(item=>item.value===button.dataset.profileValue);if(!option)return;state.selection=option.value;$('profileSearch').value=option.label;dropdown.hidden=true;$('profileSearch').setAttribute('aria-expanded','false');renderAll();}));
   }
 
   function resolveSearch() {
@@ -66,7 +75,7 @@
     const ceco=state.scope==='store' ? (raw.match(/\b\d{5}\b/)||[])[0] : null;
     const match=exact || (ceco ? options.find(item=>item.value===ceco) : null) || options.find(item=>normalize(item.search).includes(normalized));
     if (!match) { $('profileSearch').setCustomValidity('Selecciona una coincidencia válida.'); $('profileSearch').reportValidity(); return false; }
-    $('profileSearch').setCustomValidity(''); state.selection=match.value; $('profileSearch').value=match.label; return true;
+    $('profileSearch').setCustomValidity(''); state.selection=match.value; $('profileSearch').value=match.label; $('profileOptions').hidden=true; $('profileSearch').setAttribute('aria-expanded','false'); return true;
   }
 
   function seriesFromProfile(graph, cecos) {
@@ -83,7 +92,7 @@
     return state.data.months.map(month=>{
       const rows=cecos.map(cc=>state.data.business[cc]?.[String(month.id)]).filter(Boolean);
       const aggregate=graph.id==='sales'?sum:avg;
-      return {month,actual:aggregate(rows.map(row=>row[graph.actual])),reference:graph.reference?aggregate(rows.map(row=>row[graph.reference])):null};
+      return {month,actual:aggregate(rows.map(row=>row[graph.actual])),reference:graph.reference?aggregate(rows.map(row=>row[graph.reference])):null,secondaryReference:graph.secondaryReference?aggregate(rows.map(row=>row[graph.secondaryReference])):null};
     });
   }
 
@@ -111,33 +120,38 @@
   }
 
   function chartSvg(series, graph) {
-    const bounds=niceBounds(series.flatMap(item=>[item.actual,item.reference]));
+    const chartSeries=state.chartMode==='variance'
+      ? series.map(item=>({...item,actual:valid(item.actual)&&valid(item.reference)?item.actual-item.reference:null,reference:null,secondaryReference:null}))
+      : series;
+    const bounds=niceBounds(chartSeries.flatMap(item=>[item.actual,item.reference,item.secondaryReference]).concat(state.chartMode==='variance'?[0]:[]));
     if (!bounds) return '<div class="empty-chart">Sin dato verificado para este alcance.</div>';
-    const width=540,height=190,left=52,right=16,top=14,bottom=30,plotW=width-left-right,plotH=height-top-bottom;
-    const x=index=>left+(series.length===1?plotW/2:index*plotW/(series.length-1));
+    const width=540,height=210,left=60,right=18,top=28,bottom=32,plotW=width-left-right,plotH=height-top-bottom;
+    const x=index=>left+(chartSeries.length===1?plotW/2:index*plotW/(chartSeries.length-1));
     const y=value=>top+(bounds.max-value)*plotH/(bounds.max-bounds.min);
     const path=key=>{
       let output='',drawing=false;
-      series.forEach((item,index)=>{const value=item[key];if(!valid(value)){drawing=false;return;}output+=`${drawing?' L':' M'} ${x(index).toFixed(1)} ${y(value).toFixed(1)}`;drawing=true;});return output;
+      chartSeries.forEach((item,index)=>{const value=item[key];if(!valid(value)){drawing=false;return;}output+=`${drawing?' L':' M'} ${x(index).toFixed(1)} ${y(value).toFixed(1)}`;drawing=true;});return output;
     };
     const ticks=Array.from({length:4},(_,index)=>bounds.min+(bounds.max-bounds.min)*(3-index)/3);
     const grid=ticks.map(value=>`<line class="grid" x1="${left}" y1="${y(value)}" x2="${width-right}" y2="${y(value)}"/><text x="${left-8}" y="${y(value)+3}" text-anchor="end">${escapeHtml(fmt(value,graph.format))}</text>`).join('');
-    const labels=series.map((item,index)=>`<text x="${x(index)}" y="${height-8}" text-anchor="middle">${escapeHtml(item.month.short)}</text>`).join('');
-    const actualPoints=series.map((item,index)=>valid(item.actual)?`<circle class="point-a" cx="${x(index)}" cy="${y(item.actual)}" r="3.5"><title>${escapeHtml(item.month.label)}: ${escapeHtml(fmt(item.actual,graph.format))}</title></circle>`:'').join('');
-    const referencePoints=series.map((item,index)=>valid(item.reference)?`<circle class="point-r" cx="${x(index)}" cy="${y(item.reference)}" r="3"><title>${escapeHtml(item.month.label)}: ${escapeHtml(fmt(item.reference,graph.format))}</title></circle>`:'').join('');
-    return `<svg class="chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="Tendencia de ${escapeHtml(graph.title)}">${grid}${labels}<path class="actual" d="${path('actual')}"/>${graph.reference?`<path class="reference" d="${path('reference')}"/>`:''}${actualPoints}${referencePoints}</svg>`;
+    const labels=chartSeries.map((item,index)=>`<text x="${x(index)}" y="${height-8}" text-anchor="middle">${escapeHtml(item.month.short)}</text>`).join('');
+    const bars=state.chartMode==='variance'?chartSeries.map((item,index)=>valid(item.actual)?`<rect class="variance-bar ${item.actual>=0?'positive':'negative'}" x="${x(index)-14}" y="${Math.min(y(item.actual),y(0))}" width="28" height="${Math.max(2,Math.abs(y(item.actual)-y(0)))}" rx="5"/>`:'').join(''):'';
+    const actualPoints=chartSeries.map((item,index)=>valid(item.actual)?`<circle class="point-a" cx="${x(index)}" cy="${y(item.actual)}" r="3.5"><title>${escapeHtml(item.month.label)}: ${escapeHtml(fmt(item.actual,graph.format))}</title></circle><text class="value-label" x="${x(index)}" y="${Math.max(12,y(item.actual)-9)}" text-anchor="middle">${escapeHtml(fmt(item.actual,graph.format))}</text>`:'').join('');
+    const referencePoints=chartSeries.map((item,index)=>valid(item.reference)?`<circle class="point-r" cx="${x(index)}" cy="${y(item.reference)}" r="3"><title>${escapeHtml(item.month.label)} AA: ${escapeHtml(fmt(item.reference,graph.format))}</title></circle>`:'').join('');
+    const budgetPoints=chartSeries.map((item,index)=>valid(item.secondaryReference)?`<circle class="point-b" cx="${x(index)}" cy="${y(item.secondaryReference)}" r="3"><title>${escapeHtml(item.month.label)} PPTO: ${escapeHtml(fmt(item.secondaryReference,graph.format))}</title></circle>`:'').join('');
+    return `<svg class="chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${state.chartMode==='trend'?'Tendencia':'Brecha'} de ${escapeHtml(graph.title)}">${grid}${labels}${bars}${state.chartMode==='trend'?`<path class="actual" d="${path('actual')}"/>${graph.reference?`<path class="reference" d="${path('reference')}"/>`:''}${graph.secondaryReference?`<path class="budget" d="${path('secondaryReference')}"/>`:''}`:''}${actualPoints}${referencePoints}${budgetPoints}</svg>`;
   }
 
   function renderMetricCard(graph, source='profile') {
     const cecos=scopeStores().map(item=>item.cc), series=source==='business'?seriesFromBusiness(graph,cecos):seriesFromProfile(graph,cecos);
-    const actual=selectedValue(series,'actual',graph), reference=selectedValue(series,'reference',graph);
+    const actual=selectedValue(series,'actual',graph), reference=selectedValue(series,'reference',graph), secondaryReference=selectedValue(series,'secondaryReference',graph);
     const delta=valid(actual)&&valid(reference)?actual-reference:(graph.isDiffOnly?actual:null);
     const refLabel=graph.referenceKind==='ppto'?'PPTO':'AA';
     const title=graph.id==='productividad'?state.productivity:graph.title;
     const control=graph.id==='productividad'?`<select class="card-control" data-productivity aria-label="Métrica de productividad"><option${state.productivity==='IPLH'?' selected':''}>IPLH</option><option${state.productivity==='TPLH'?' selected':''}>TPLH</option></select>`:'';
     const subtitle=graph.subtitle||graph.note||`Real vs ${refLabel}`;
     const verdict=deltaClass(delta,graph);
-    return `<article class="metric-card ${verdict}"><div class="metric-head"><div><h3>${escapeHtml(title)}</h3><p>${escapeHtml(subtitle)}</p></div>${control}</div><div class="metric-values"><div><small>Real</small><strong>${fmt(actual,graph.format)}</strong></div><div><small>${graph.reference?refLabel:'Referencia'}</small><strong>${graph.reference?fmt(reference,graph.format):'—'}</strong></div><div class="delta ${verdict}"><small>Diferencia</small><strong>${fmt(delta,graph.format,true)}</strong></div></div>${chartSvg(series,{...graph,title})}<div class="legend"><span><i class="legend-a"></i>Real</span>${graph.reference?`<span><i class="legend-r"></i>${refLabel}</span>`:''}</div></article>`;
+    return `<article class="metric-card ${verdict}"><div class="metric-head"><div><h3>${escapeHtml(title)}</h3><p>${escapeHtml(subtitle)}</p></div>${control}</div><div class="metric-values ${graph.secondaryReference?'four':''}"><div><small>Real</small><strong>${fmt(actual,graph.format)}</strong></div><div><small>${graph.reference?refLabel:'Referencia'}</small><strong>${graph.reference?fmt(reference,graph.format):'—'}</strong></div>${graph.secondaryReference?`<div><small>PPTO</small><strong>${fmt(secondaryReference,graph.format)}</strong></div>`:''}<div class="delta ${verdict}"><small>Brecha vs ${refLabel}</small><strong>${fmt(delta,graph.format,true)}</strong></div></div>${chartSvg(series,{...graph,title})}<div class="legend"><span><i class="legend-a"></i>${state.chartMode==='trend'?'Real':'Brecha'}</span>${state.chartMode==='trend'&&graph.reference?`<span><i class="legend-r"></i>${refLabel}</span>`:''}${state.chartMode==='trend'&&graph.secondaryReference?'<span><i class="legend-b"></i>PPTO</span>':''}</div></article>`;
   }
 
   function operationalSnapshot() {
@@ -171,12 +185,15 @@
     const partner=aggregatePartners(cecos), businessSeries=seriesFromBusiness(BUSINESS_GRAPHS[0],cecos), sales=selectedValue(businessSeries,'actual',BUSINESS_GRAPHS[0]);
     const profileCount=cecos.filter(cc=>state.data.profile[cc]).length, businessCount=cecos.filter(cc=>state.data.business[cc]).length;
     const title=state.scope==='store'?`${first.cc} · ${first.store}`:state.selection;
-    const sub=state.scope==='store'?`${first.dm||'DM sin dato'} · ${first.region||'Región sin dato'}`:`${stores.length} tiendas · ${[...new Set(stores.map(item=>item.region).filter(Boolean))].length} región(es)`;
-    const details=state.scope==='store'?`${first.city||'Ciudad sin dato'} · Apertura ${formatDate(first.opened)}`:`Cobertura consolidada del alcance seleccionado`;
+    const regions=[...new Set(stores.map(item=>item.region).filter(Boolean))], districts=[...new Set(stores.map(item=>item.dm).filter(Boolean))];
+    const owner=state.scope==='store'?(first.manager||'Gerente sin dato'):state.scope==='dm'?state.selection:([...new Set(stores.map(item=>item.rd).filter(Boolean))][0]||'Director regional sin dato');
+    const ownerRole=state.scope==='store'?'Gerente de tienda':state.scope==='dm'?'District Manager':'Director regional';
+    const sub=state.scope==='store'?`${first.dm||'DM sin dato'} · ${first.region||'Región sin dato'}`:`${stores.length} tiendas en el portafolio`;
+    const details=state.scope==='store'?`${first.city||'Ciudad sin dato'}, ${first.state||'Estado sin dato'}`:`${districts.length} distrito(s) · ${regions.length} región(es)`;
     $('profileHero').classList.remove('skeleton');
-    $('profileHero').innerHTML=`<div class="profile-identity"><span class="eyebrow">${state.scope==='store'?'PERFIL DE TIENDA':state.scope==='dm'?'PERFIL DISTRITAL':'PERFIL REGIONAL'}</span><h1>${escapeHtml(title)}</h1><p>${escapeHtml(sub)}</p><p>${escapeHtml(details)}</p></div>${heroStat('Tiendas',stores.length,'Directorio verificado')}${heroStat('Partners',partner.headcount,'Activos resumidos')}${heroStat('Venta',fmt(sales,'currency'),state.period==='YTD'?'Acumulado YTD':'Periodo seleccionado')}${heroStat('Perfil',`${profileCount}/${stores.length}`,'Tiendas con Excel base')}${heroStat('Negocio',`${businessCount}/${stores.length}`,'Tiendas con CSV negocio')}`;
+    $('profileHero').innerHTML=`<div class="profile-identity"><span class="eyebrow">${state.scope==='store'?'PERFIL DE TIENDA':state.scope==='dm'?'PERFIL DISTRITAL':'PERFIL REGIONAL'}</span><h1>${escapeHtml(title)}</h1><p>${escapeHtml(sub)}</p><p>${escapeHtml(details)}</p></div><div class="profile-owner"><span class="avatar">${escapeHtml((owner.match(/\b\p{L}/gu)||['P']).slice(0,2).join(''))}</span><div><small>${escapeHtml(ownerRole)}</small><strong>${escapeHtml(owner)}</strong><span>${escapeHtml(state.scope==='store'?(first.managerEmail||first.storeEmail||'Contacto no informado'):`Responsable de ${stores.length} tienda(s)`)}</span></div></div><div class="profile-details">${profileFact(state.scope==='store'?'Apertura':'Cobertura',state.scope==='store'?formatDate(first.opened):`${profileCount}/${stores.length} perfiles`)}${profileFact(state.scope==='store'?'Formato':'Distritos',state.scope==='store'?(first.format||first.generator||'Sin dato'):districts.length)}${profileFact('Partners',partner.headcount)}${profileFact('Venta YTD',fmt(sales,'millions'))}</div><div class="profile-coverage"><span>${profileCount}/${stores.length} Perfil</span><span>${businessCount}/${stores.length} Negocio</span></div>`;
   }
-  const heroStat=(label,value,note)=>`<div class="hero-stat"><small>${escapeHtml(label)}</small><strong>${escapeHtml(value)}</strong><span>${escapeHtml(note)}</span></div>`;
+  const profileFact=(label,value)=>`<div><small>${escapeHtml(label)}</small><strong>${escapeHtml(value)}</strong></div>`;
 
   function aggregatePartners(cecos) {
     const rows=cecos.map(cc=>state.data.partners[cc]).filter(Boolean), total=key=>sum(rows.map(row=>row[key]))||0;
@@ -188,19 +205,20 @@
   function renderPartnerPanel() {
     const result=aggregatePartners(scopeStores().map(item=>item.cc));
     const roles=Object.entries(result.roles).sort((a,b)=>b[1]-a[1]).slice(0,7);
-    $('partnerPanel').innerHTML=`<div class="panel-head"><div><span class="eyebrow">QUERY PARTNER</span><h2>Equipo resumido</h2></div><span class="source-status ready"><i></i>${result.headcount} activos</span></div><div class="partner-kpis">${miniKpi('Baristas',result.baristas)}${miniKpi('Supervisores',result.supervisors)}${miniKpi('Edad media',fmt(result.avgAge,'decimal'))}${miniKpi('Antigüedad',valid(result.avgTenureMonths)?`${(result.avgTenureMonths/12).toFixed(1)} años`:'—')}${miniKpi('Cumpleaños mes',result.birthdaysThisMonth)}${miniKpi('Aniversarios mes',result.anniversariesThisMonth)}${miniKpi('Mujeres',result.female)}${miniKpi('Hombres',result.male)}</div><div class="role-list">${roles.length?roles.map(([key,value])=>`<span>${escapeHtml(key)} · ${value}</span>`).join(''):'<span>Sin datos coincidentes</span>'}</div>`;
+    const maxRole=Math.max(...roles.map(([,value])=>value),1), femaleShare=result.headcount?result.female/result.headcount:0;
+    $('partnerPanel').innerHTML=`<div class="panel-head"><div><span class="eyebrow">PERSONAS DEL PERFIL</span><h2>Equipo</h2><p>Composición activa del alcance seleccionado.</p></div><strong class="panel-total">${result.headcount}<small>partners</small></strong></div><div class="team-layout"><div class="team-donut" style="--share:${femaleShare*100}"><strong>${fmt(femaleShare,'percent')}</strong><span>mujeres</span></div><div class="role-bars">${roles.length?roles.map(([key,value])=>`<div><span>${escapeHtml(key)}</span><i><b style="width:${value/maxRole*100}%"></b></i><strong>${value}</strong></div>`).join(''):'<div class="empty-chart">Sin datos coincidentes</div>'}</div></div><div class="team-facts">${miniKpi('Edad media',fmt(result.avgAge,'decimal'))}${miniKpi('Antigüedad',valid(result.avgTenureMonths)?`${(result.avgTenureMonths/12).toFixed(1)} años`:'—')}${miniKpi('Cumpleaños',result.birthdaysThisMonth)}${miniKpi('Aniversarios',result.anniversariesThisMonth)}</div>`;
   }
   const miniKpi=(label,value)=>`<div><small>${escapeHtml(label)}</small><strong>${escapeHtml(value)}</strong></div>`;
 
   function aggregateMix(cecos) {
     const category={},order={}; let total=0;
-    const months=state.period==='YTD'?state.data.months.map(item=>String(item.id)):[String(state.period)];
+    const months=state.mixMonth==='YTD'?state.data.months.map(item=>String(item.id)):[String(state.mixMonth)];
     cecos.forEach(cc=>months.forEach(month=>{const row=state.data.mix[cc]?.[month];if(!row||!valid(row.total))return;total+=row.total;Object.entries(row.category||{}).forEach(([key,value])=>category[key]=(category[key]||0)+value*row.total);Object.entries(row.order||{}).forEach(([key,value])=>order[key]=(order[key]||0)+value*row.total);}));
     if (total) { Object.keys(category).forEach(key=>category[key]/=total); Object.keys(order).forEach(key=>order[key]/=total); }
     return {category,order,total};
   }
   function mixRows(values) { const entries=Object.entries(values).sort((a,b)=>b[1]-a[1]).slice(0,6); return entries.length?entries.map(([key,value])=>`<div class="mix-row"><span title="${escapeHtml(key)}">${escapeHtml(key)}</span><div class="mix-bar"><i style="width:${Math.min(100,value*100)}%"></i></div><b>${fmt(value,'percent')}</b></div>`).join(''):'<div class="empty-chart">Sin cruce exacto de Mix.</div>'; }
-  function renderMixPanel() { const mix=aggregateMix(scopeStores().map(item=>item.cc)); $('mixPanel').innerHTML=`<div class="panel-head"><div><span class="eyebrow">BASE MIX</span><h2>Mix de venta</h2></div><span class="source-status ${mix.total?'ready':''}"><i></i>${mix.total?'Cruce verificado':'Sin coincidencia'}</span></div><div class="mix-layout"><div class="mix-block"><h3>Producto</h3>${mixRows(mix.category)}</div><div class="mix-block"><h3>Tipo de orden</h3>${mixRows(mix.order)}</div></div>`; }
+  function renderMixPanel() { const mix=aggregateMix(scopeStores().map(item=>item.cc)); const options='<option value="YTD">Acumulado</option>'+state.data.months.map(month=>`<option value="${month.id}"${String(state.mixMonth)===String(month.id)?' selected':''}>${escapeHtml(month.label)}</option>`).join(''); $('mixPanel').innerHTML=`<div class="panel-head"><div><span class="eyebrow">COMPOSICIÓN DE VENTA</span><h2>Mix</h2><p>Participación por producto y canal.</p></div><label class="mix-month"><span>Mes</span><select id="mixMonthSelect">${options}</select></label></div><div class="mix-layout"><div class="mix-block"><h3>Producto</h3>${mixRows(mix.category)}</div><div class="mix-block"><h3>Canal de orden</h3>${mixRows(mix.order)}</div></div>`; $('mixMonthSelect').value=String(state.mixMonth); $('mixMonthSelect').addEventListener('change',event=>{state.mixMonth=event.target.value;renderMixPanel();}); }
 
   function renderMetrics() {
     let graphs=state.data.graphs.filter(graph=>graph.pillar===state.pillar);
@@ -212,38 +230,19 @@
 
   function renderAll() {
     renderHero(); renderOperational(); renderMetrics(); renderPartnerPanel(); renderMixPanel();
-    const number={Partner:'01',Cliente:'02',Negocio:'03'}[state.pillar];
-    $('pillarEyebrow').textContent=`PILAR ${number}`; $('pillarTitle').textContent=state.pillar; $('pillarDescription').textContent=descriptions[state.pillar];
+    $('pillarEyebrow').textContent='INDICADORES'; $('pillarTitle').textContent=state.pillar; $('pillarDescription').textContent=descriptions[state.pillar];
     document.querySelectorAll('[data-pillar]').forEach(button=>button.classList.toggle('active',button.dataset.pillar===state.pillar));
-  }
-
-  function showAudit() {
-    const audit=state.audit;
-    $('dialogTitle').textContent='Calidad de los motores';
-    $('dialogContent').innerHTML=`<div class="dialog-body"><div class="audit-grid">${auditKpi('Errores',audit.issueCount)}${auditKpi('Advertencias',audit.warningCount)}${auditKpi('Tiendas',audit.directory.validStores)}${auditKpi('Meses',state.data.months.length)}${auditKpi('Perfil',audit.profile.matchedStores)}${auditKpi('Negocio',audit.business.matchedStores)}${auditKpi('Mix',audit.mix.matchedStores)}${auditKpi('Partner',audit.partners.matchedStores)}</div><ul class="warning-list">${audit.warnings.map(item=>`<li>${escapeHtml(item)}</li>`).join('')}</ul></div>`;
-    $('detailsDialog').showModal();
-  }
-  const auditKpi=(label,value)=>`<div><small>${escapeHtml(label)}</small><strong>${escapeHtml(value)}</strong></div>`;
-  function showInstructions() {
-    $('dialogTitle').textContent='Instrucciones del motor';
-    $('dialogContent').innerHTML=`<div class="dialog-body"><ul class="instruction-list">${state.data.instructions.map(item=>`<li><strong>${escapeHtml(item.pillar)} · ${escapeHtml(item.graph||item.header)}</strong><span>${escapeHtml(item.instruction||'Sin instrucción adicional')}${item.note?` — ${escapeHtml(item.note)}`:''}</span></li>`).join('')}</ul></div>`;
-    $('detailsDialog').showModal();
   }
 
   function bindEvents() {
     document.querySelectorAll('[data-scope]').forEach(button=>button.addEventListener('click',()=>{state.scope=button.dataset.scope;document.querySelectorAll('[data-scope]').forEach(item=>item.classList.toggle('active',item===button));fillOptions();renderAll();}));
     document.querySelectorAll('[data-pillar]').forEach(button=>button.addEventListener('click',()=>{state.pillar=button.dataset.pillar;renderAll();}));
+    document.querySelectorAll('[data-chart-mode]').forEach(button=>button.addEventListener('click',()=>{state.chartMode=button.dataset.chartMode;document.querySelectorAll('[data-chart-mode]').forEach(item=>item.classList.toggle('active',item===button));renderMetrics();}));
     $('profileSearch').addEventListener('change',()=>{if(resolveSearch())renderAll();});
+    $('profileSearch').addEventListener('focus',()=>{renderPickerOptions('');$('profileOptions').hidden=false;$('profileSearch').setAttribute('aria-expanded','true');});
+    $('profileSearch').addEventListener('input',event=>{renderPickerOptions(event.target.value);$('profileOptions').hidden=false;$('profileSearch').setAttribute('aria-expanded','true');});
+    $('profileSearch').addEventListener('blur',()=>setTimeout(()=>{$('profileOptions').hidden=true;$('profileSearch').setAttribute('aria-expanded','false');},120));
     $('profileSearch').addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();if(resolveSearch())renderAll();}});
-    $('periodSelect').addEventListener('change',event=>{state.period=event.target.value;renderAll();});
-    $('printButton').addEventListener('click',()=>window.print()); $('qualityButton').addEventListener('click',showAudit); $('instructionsButton').addEventListener('click',showInstructions);
-    $('dialogClose').addEventListener('click',()=>$('detailsDialog').close());
-    const navigation=[...document.querySelectorAll('.quick-nav a')];
-    navigation.forEach(link=>link.addEventListener('click',()=>navigation.forEach(item=>item.classList.toggle('active',item===link))));
-    if ('IntersectionObserver' in window) {
-      const observer=new IntersectionObserver(entries=>entries.filter(entry=>entry.isIntersecting).forEach(entry=>navigation.forEach(link=>link.classList.toggle('active',link.hash===`#${entry.target.id}`))),{rootMargin:'-20% 0px -65%'});
-      ['resumen','indicadores','equipo-mix','uso'].map(id=>$(id)).filter(Boolean).forEach(section=>observer.observe(section));
-    }
   }
 
   async function start() {
@@ -255,8 +254,7 @@
       state.data.directory.sort((a,b)=>a.cc.localeCompare(b.cc));
       const firstVerified=state.data.directory.find(item=>state.data.profile[item.cc]||state.data.business[item.cc]);
       fillOptions(firstVerified?.cc||'');
-      $('periodSelect').innerHTML='<option value="YTD">YTD</option>'+state.data.months.map(month=>`<option value="${month.id}">${month.period} · ${escapeHtml(month.label)}</option>`).join('');
-      $('sourceStatus').classList.add('ready'); $('sourceStatus').querySelector('span').textContent=`${state.data.months.length} meses · ${state.audit.warningCount} advertencias controladas`;
+      $('sourceStatus').classList.add('ready'); $('sourceStatus').querySelector('span').textContent=`${state.data.months.length} meses validados`;
       bindEvents(); renderAll();
       if ('serviceWorker' in navigator && location.protocol!=='file:') navigator.serviceWorker.register('sw.js').catch(()=>{});
     } catch (error) {

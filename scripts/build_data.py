@@ -270,9 +270,14 @@ def build(root: Path, output: Path, audit_output: Path) -> tuple[dict[str, Any],
         if actual not in metric_index:
             warnings.append(f"Métrica clasificada no encontrada: {actual}")
             continue
+        graph_name = normalize(item["graph"])
+        metric_name = normalize(actual)
+        # VMT y OMT son indicadores operativos de Negocio aunque la hoja de
+        # clasificación de versiones anteriores los ubicara en Cliente.
+        pillar = "Negocio" if graph_name in {"VMT", "OMT"} or metric_name in {"VMT", "OMT"} else item["pillar"]
         graphs.append({
             "id": re.sub(r"[^a-z0-9]+", "-", normalize(item["graph"]).lower()).strip("-"),
-            "pillar": item["pillar"], "title": item["graph"], "actual": actual,
+            "pillar": pillar, "title": item["graph"], "actual": actual,
             "reference": reference if reference in metric_index else None,
             "referenceKind": pair_kind(reference), "format": metric_format(actual),
             "direction": metric_direction(item["graph"]),
@@ -312,7 +317,18 @@ def build(root: Path, output: Path, audit_output: Path) -> tuple[dict[str, Any],
 
     business: defaultdict[str, dict[str, dict[str, float | None]]] = defaultdict(dict)
     business_unmatched = Counter(); business_duplicates = Counter(); business_months = Counter(); business_years = Counter()
-    for source_name, rows in (("business_aa", load_export_csv(paths["business_aa"])), ("business_real", load_export_csv(paths["business_real"]))):
+    business_inputs = {name: load_export_csv(paths[name]) for name in ("business_aa", "business_real")}
+    business_real_headers = list(business_inputs["business_real"][0]) if business_inputs["business_real"] else []
+    required_business = {
+        "business_aa": {"Mes", "Tiendas", "ADT AA", "OMT"},
+        "business_real": {"Mes", "Tiendas", "ADT Real", "Venta $", "Var Ventas vs Ppto (%)", "AWS $", "Ticket Prom Real", "Ticket Prom AA", "Ticket Prom Ppto", "Var Ticket vs AA (%)", "Var Ticket vs Ppto (%)"},
+    }
+    for source_name, rows in business_inputs.items():
+        source_headers = set(rows[0]) if rows else set()
+        if missing := required_business[source_name].difference(source_headers):
+            raise ValueError(f"{paths[source_name].name} sin encabezados requeridos: {sorted(missing)}")
+    business_seen: set[tuple[str, int, str]] = set()
+    for source_name, rows in business_inputs.items():
         for row in rows:
             month = month_from_period(row.get("Mes")); year = year_from_period(row.get("Mes")); cc = clean_cc(row.get("Tiendas"))
             if month is None or not cc: continue
@@ -320,7 +336,11 @@ def build(root: Path, output: Path, audit_output: Path) -> tuple[dict[str, Any],
             if cc not in directory_by_cc:
                 business_unmatched[cc] += 1; continue
             target = business[cc].setdefault(str(month), {})
-            if source_name in target: business_duplicates[f"{cc}-{month}-{source_name}"] += 1
+            source_key = (cc, month, source_name)
+            if source_key in business_seen:
+                business_duplicates[f"{cc}-{month}-{source_name}"] += 1
+                continue
+            business_seen.add(source_key)
             if source_name == "business_aa":
                 target.update({"adtAa": round_number(number(row.get("ADT AA"))), "omtDiff": round_number(number(row.get("OMT")))})
             else:
@@ -331,7 +351,9 @@ def build(root: Path, output: Path, audit_output: Path) -> tuple[dict[str, Any],
                     "salesBudget": round_number(budget, 2), "salesVariance": round_number(variance),
                     "aws": round_number(number(row.get("AWS $")), 2), "ticket": round_number(number(row.get("Ticket Prom Real")), 2),
                     "ticketAa": round_number(number(row.get("Ticket Prom AA")), 2),
+                    "ticketBudget": round_number(number(row.get("Ticket Prom Ppto")), 2),
                     "ticketVariance": round_number(number(row.get("Var Ticket vs AA (%)"), percent=True)),
+                    "ticketBudgetVariance": round_number(number(row.get("Var Ticket vs Ppto (%)"), percent=True)),
                 })
             business_months[month] += 1
 
@@ -428,7 +450,7 @@ def build(root: Path, output: Path, audit_output: Path) -> tuple[dict[str, Any],
         "issues": issues, "warnings": warnings, "sources": sources,
         "directory": {"rows": len(directory_rows), "validStores": len(directory)},
         "profile": {"rows": profile_sheet.max_row - 1, "matchedStores": len(profile), "months": dict(profile_months), "monthHeader": headers[month_column], "ccHeader": headers[cc_column], "minus100Blanked": dict(minus_100_blanked), "durationOutliersBlanked": dict(duration_blanked), "unmatched": dict(profile_unmatched)},
-        "business": {"matchedStores": len(business), "months": dict(business_months), "years": dict(business_years), "unmatched": dict(business_unmatched)},
+        "business": {"matchedStores": len(business), "months": dict(business_months), "years": dict(business_years), "unmatched": dict(business_unmatched), "realHeaders": business_real_headers},
         "mix": {"sourceRows": mix_rows, "manifestRows": mix_manifest.get("rows"), "parts": len(mix_paths), "months": dict(mix_months), "matchedRows": mix_matched_rows, "matchedStores": len(mix), "invalidRows": mix_invalid_sales, "unmatchedNames": len(mix_unmatched), "unmatchedTop": dict(mix_unmatched.most_common(100))},
         "partners": {"uniqueEmployees": len(employees), "matchedStores": len(partners), "unmatched": dict(partner_unmatched)},
         "coverage": coverage,

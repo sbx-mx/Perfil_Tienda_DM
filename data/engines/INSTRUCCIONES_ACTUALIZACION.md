@@ -14,6 +14,8 @@ Exportación UTF-16 del reporte original.
 El pipeline busca el encabezado real que comienza con `Mes` aunque existan líneas de título.
 `Mes` usa `YYYYMM`; `Tiendas` contiene el CeCo.
 Se validan y cruzan por separado. Aumentar o disminuir tiendas no requiere cambios de código.
+`Base_Perfil Tienda_2.csv` debe conservar: `ADT Real`, `Venta $`, `Var Ventas vs Ppto (%)`, `AWS $`, `Ticket Prom Real`, `Ticket Prom AA`, `Ticket Prom Ppto`, `Var Ticket vs AA (%)` y `Var Ticket vs Ppto (%)`.
+Ticket se grafica con tres series verificadas: Real, AA y PPTO. Si falta cualquiera de estos encabezados, el build se detiene antes de publicar.
 Directorio_Perfil Tienda.csv
 Codificación UTF-8 y llave única `CC` de cinco dígitos.
 Actualiza altas/bajas aquí primero. Los filtros Tienda, DM y Región se generan dinámicamente.

@@ -101,13 +101,31 @@ class PipelineTests(unittest.TestCase):
 
     def test_simple_navigation_is_complete(self):
         html=(ROOT/"index.html").read_text(encoding="utf-8")
-        for anchor in ("#resumen","#indicadores","#equipo-mix","#uso"):
-            self.assertIn(f'href="{anchor}"',html)
+        for obsolete in ("quick-nav","qualityButton","printButton","periodSelect","instructions-panel","PILAR 01","<span>01</span>"):
+            self.assertNotIn(obsolete,html)
+        for label in ("Partner","Cliente","Negocio","Tendencia","Brecha"):
+            self.assertIn(label,html)
+
+    def test_ticket_supports_aa_and_budget(self):
+        self.assertIn("Ticket Prom Ppto",self.audit["business"]["realHeaders"])
+        self.assertIn("Var Ticket vs Ppto (%)",self.audit["business"]["realHeaders"])
+        rows=[row for months in self.payload["business"].values() for row in months.values()]
+        self.assertTrue(any(row.get("ticketBudget") is not None for row in rows))
+        app=(ROOT/"app.js").read_text(encoding="utf-8")
+        self.assertIn("secondaryReference:'ticketBudget'",app)
+
+    def test_vmt_and_omt_are_business_metrics(self):
+        graphs=[graph for graph in self.payload["graphs"] if graph["title"].upper() in {"VMT","OMT"}]
+        self.assertGreaterEqual(len(graphs),2)
+        self.assertTrue(all(graph["pillar"]=="Negocio" for graph in graphs))
 
     def test_cleanup_covers_all_known_root_legacy_files(self):
         manifest=json.loads((ROOT/"scripts/obsolete-files.json").read_text(encoding="utf-8"))
         expected={"data.js","Store_Master_Audit.csv","README.txt","manifest.json","apple-touch-icon.png","icon-192.png","icon-512.png","icon.svg","style.css","data/engines/Base_Mix.csv"}
         self.assertEqual(set(manifest["obsoleteFiles"]),expected)
+        workflow=(ROOT/".github/workflows/cleanup-obsolete.yml").read_text(encoding="utf-8")
+        self.assertIn("workflow_run:",workflow)
+        self.assertIn("Validar y publicar Perfil de Tienda",workflow)
 
     def test_audit_has_no_blocking_issues(self):
         self.assertEqual(self.audit["issueCount"],0)
